@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { adminAuth } from '@/core/firebase/admin'
 
-// Routes fully public — no token needed
+// Routes fully public — no token needed at all
 const PUBLIC_ROUTES = [
   '/api/incidents/sos',
   '/api/guests/exit-route',
@@ -13,15 +12,15 @@ const PUBLIC_ROUTES = [
   '/api/deadman/status',      // guest polls session status (no auth, uses token)
 ]
 
-// Routes restricted to manager role
-const MANAGER_ONLY_ROUTES = [
-  '/api/reports',
-]
+// NOTE: Full Firebase JWT verification happens inside each route handler via
+// getRequestUser() from @/core/auth. Middleware only does a lightweight
+// presence check because middleware runs in Edge Runtime which cannot use
+// firebase-admin (a Node.js-only package).
 
-export async function middleware(req: NextRequest) {
+export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
-  // CORS preflight
+  // CORS preflight — handle before anything else
   if (req.method === 'OPTIONS') {
     return new NextResponse(null, {
       status: 200,
@@ -34,9 +33,11 @@ export async function middleware(req: NextRequest) {
   }
 
   if (!pathname.startsWith('/api/')) return NextResponse.next()
+
+  // Public routes — pass straight through
   if (PUBLIC_ROUTES.some(r => pathname.startsWith(r))) return NextResponse.next()
 
-  // All other API routes need a valid JWT
+  // Protected routes — check a token is present (verification is in the route handler)
   const auth = req.headers.get('Authorization')
   if (!auth?.startsWith('Bearer ')) {
     return NextResponse.json(
@@ -45,42 +46,7 @@ export async function middleware(req: NextRequest) {
     )
   }
 
-  const token = auth.replace('Bearer ', '')
-  const client = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
-
-  const { data: { user }, error } = await client.auth.getUser(token)
-  if (error || !user) {
-    return NextResponse.json(
-      { success: false, error: 'Invalid or expired token', code: 'UNAUTHORIZED' },
-      { status: 401 }
-    )
-  }
-
-  // Check manager-only routes
-  if (MANAGER_ONLY_ROUTES.some(r => pathname.startsWith(r))) {
-    const admin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      { auth: { autoRefreshToken: false, persistSession: false } }
-    )
-    const { data: profile } = await admin
-      .from('user_profiles').select('role').eq('id', user.id).single()
-
-    if (profile?.role !== 'manager') {
-      return NextResponse.json(
-        { success: false, error: 'Manager role required', code: 'FORBIDDEN' },
-        { status: 403 }
-      )
-    }
-  }
-
-  // Pass user ID downstream
-  const headers = new Headers(req.headers)
-  headers.set('x-user-id', user.id)
-  return NextResponse.next({ request: { headers } })
+  return NextResponse.next()
 }
 
 export const config = { matcher: ['/api/:path*'] }

@@ -45,7 +45,7 @@ create trigger deadman_updated_at
 
 create table staff_presence (
   id           uuid primary key default uuid_generate_v4(),
-  user_id      uuid not null references auth.users(id) on delete cascade,
+  user_id      text not null,  -- Firebase UID (text, not uuid)
   hotel_id     uuid not null references hotels(id) on delete cascade,
   incident_id  uuid not null references incidents(id) on delete cascade,
   last_ping_at timestamptz not null default now(),

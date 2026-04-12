@@ -1,5 +1,3 @@
-// src/core/ai/index.ts  — replace the top of the file
-
 import { GoogleGenAI } from '@google/genai'
 
 let _client: GoogleGenAI | null = null
@@ -56,16 +54,68 @@ export interface TriageOutput {
 
 const STAFF_ROLES = ['security','housekeeping','front_desk','maintenance','management','f_and_b','medical']
 
+function buildTriagePrompt(input: TriageInput): string {
+  const guestList = input.guestsOnFloor.map(g =>
+    `  Room ${g.room}: ${g.name} (lang: ${g.language}${g.needsAccessibility ? ', accessibility' : ''})`
+  ).join('\n')
+
+  const exitList = input.floorExits.map(e =>
+    `  ${e.id}: "${e.label}" (${e.type}, accessible: ${e.accessible})`
+  ).join('\n')
+
+  const musterList = input.musterPoints.map(m =>
+    `  ${m.id}: ${m.label} — ${m.location_description}`
+  ).join('\n')
+
+  const langs = [...new Set(input.guestLanguages)].join(', ') || 'en'
+
+  return `
+INCIDENT — ${input.hotelName}
+Type: ${input.type} | Floor: ${input.floor}/${input.totalFloors} | Zone: ${input.zone} | Room: ${input.room ?? 'corridor'}
+Source: ${input.source} | Drill: ${input.isDrill}
+${input.sensorValue !== undefined ? `Sensor: ${input.sensorType} reading ${input.sensorValue} (threshold ${input.sensorThreshold})` : ''}
+${input.reporterDescription ? `Note: "${input.reporterDescription}"` : ''}
+
+GUESTS ON FLOOR (${input.guestsOnFloor.length}):
+${guestList || '  None registered'}
+LANGUAGES: ${langs}
+
+EXITS:
+${exitList || '  None mapped'}
+
+MUSTER POINTS:
+${musterList || '  Car park Level B1'}
+
+ACCESS CODES: ${JSON.stringify(input.accessCodes)}
+
+Return ONLY valid JSON, no markdown:
+{
+  "severity": <1|2|3>,
+  "severity_reason": "<one sentence>",
+  "briefing": "<2-3 sentence manager summary>",
+  "responder_briefing": "<structured briefing for fire dept / ambulance>",
+  "recommend_911": <true|false>,
+  "recommend_911_reason": "<reason or null>",
+  "tasks": [{ "role": "<${STAFF_ROLES.join('|')}>", "text": "<specific task>", "priority": <1-10>, "protocol_id": null }],
+  "guest_alert_en": "<calm clear English alert>",
+  "guest_alert_translations": { "<lang>": "<translation>" },
+  "evacuation_instruction_template": "<uses {{room}}, {{exit_label}}, {{muster_point}}>"
+}
+Severity: 1=evacuate now, 2=investigate urgently, 3=monitor.
+Cover ALL languages: ${langs}.
+${input.isDrill ? 'Prefix ALL guest alerts with [DRILL].' : ''}
+`
+}
+
 export async function runTriage(input: TriageInput): Promise<TriageOutput> {
-  const prompt = buildTriagePrompt(input)   // same function, no change
+  const prompt = buildTriagePrompt(input)
 
   try {
     const response = await getClient().models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
-        systemInstruction: `You are NexAlert AI crisis coordinator. 
-          Respond with valid JSON only. Be calm, precise, actionable.`,
+        systemInstruction: 'You are NexAlert AI crisis coordinator. Respond with valid JSON only. Be calm, precise, actionable.',
         maxOutputTokens: 2000,
       },
     })
@@ -123,7 +173,6 @@ function fallbackTriage(input: TriageInput): TriageOutput {
   }
 }
 
-/** Builds a personalized evacuation instruction for one room */
 export function buildEvacuationInstruction(
   template: string,
   room: string,
@@ -139,18 +188,28 @@ export function buildEvacuationInstruction(
     .replace(/\{\{muster_point\}\}/g, musterPoint)
 }
 
-/** Generates the executive summary and recommendations for an incident report */
-export async function generateReportNarrative(data: { ... }) {
-  const response = await getClient().models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: `Write executive_summary and recommendations for this incident. 
-      Return JSON only.\n\n${JSON.stringify(data, null, 2)}`,
-    config: {
-      systemInstruction: 'You write concise professional hotel incident reports. Output valid JSON only.',
-      maxOutputTokens: 1000,
-    },
-  })
+export async function generateReportNarrative(data: {
+  incident: Record<string, unknown>
+  tasks: Record<string, unknown>[]
+  notifications: Record<string, unknown>[]
+  timeline: { timestamp: string; event: string; actor: string }[]
+}): Promise<{ executive_summary: string; recommendations: string[] }> {
+  try {
+    const response = await getClient().models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Write executive_summary and recommendations for this incident. Return JSON only.\n\n${JSON.stringify(data, null, 2)}`,
+      config: {
+        systemInstruction: 'You write concise professional hotel incident reports. Output valid JSON only.',
+        maxOutputTokens: 1000,
+      },
+    })
 
-  const text = response.text ?? '{}'
-  return JSON.parse(text.replace(/```json|```/g, '').trim())
+    const text = response.text ?? '{}'
+    return JSON.parse(text.replace(/```json|```/g, '').trim())
+  } catch {
+    return {
+      executive_summary: `Incident of type ${data.incident.type} on Floor ${data.incident.floor}.`,
+      recommendations: ['Review response times', 'Ensure staff complete protocol training'],
+    }
+  }
 }

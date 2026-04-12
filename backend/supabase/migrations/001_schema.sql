@@ -20,7 +20,7 @@ create table hotels (
 
 -- ─── Users (extends Supabase auth.users) ─────────────────────────────────────
 create table user_profiles (
-  id              uuid primary key references auth.users(id) on delete cascade,
+  id              text primary key,  -- Firebase UID (string, not UUID)
   hotel_id        uuid references hotels(id),
   name            text not null,
   role            text not null check (role in ('guest','staff','manager','responder')),
@@ -95,7 +95,7 @@ create table incidents (
   sensor_threshold        numeric,
 
   -- Reporter
-  reporter_id             uuid references auth.users(id),
+  reporter_id             text,  -- Firebase UID
   reporter_role           text,
   reporter_language       text,
 
@@ -126,7 +126,7 @@ create table staff_tasks (
   id                  uuid primary key default uuid_generate_v4(),
   incident_id         uuid not null references incidents(id) on delete cascade,
   hotel_id            uuid not null references hotels(id),
-  assigned_to_user_id uuid references auth.users(id),
+  assigned_to_user_id text,  -- Firebase UID
   assigned_to_role    text not null,
   task_text           text not null,
   protocol_id         text,
@@ -147,7 +147,7 @@ create index staff_tasks_role_idx on staff_tasks(hotel_id, assigned_to_role, sta
 create table guest_locations (
   id                          uuid primary key default uuid_generate_v4(),
   hotel_id                    uuid not null references hotels(id) on delete cascade,
-  guest_id                    uuid references auth.users(id),
+  guest_id                    text,  -- Firebase UID
   guest_name                  text not null,
   room_number                 text not null,
   floor                       int not null,
@@ -261,6 +261,19 @@ create trigger guest_locations_updated_at before update on guest_locations for e
 create trigger user_profiles_updated_at before update on user_profiles for each row execute function update_updated_at();
 
 -- ─── Row Level Security ───────────────────────────────────────────────────────
+-- IMPORTANT ARCHITECTURE NOTE:
+-- This project uses Firebase Authentication instead of Supabase Auth.
+-- auth.uid() returns NULL for Firebase users — RLS policies using auth.uid()
+-- will NOT work for direct client queries using the anon key.
+--
+-- Security is enforced at the API layer:
+--   • All API routes use adminDb (service role) which bypasses RLS
+--   • Route handlers call getRequestUser() to verify Firebase JWT tokens
+--   • hasRole() and hotel_id checks are performed in every handler
+--
+-- If you add direct browser Supabase queries (e.g. in hooks), pass the
+-- Supabase service role key or ensure those queries are read-only public data.
+-- ─────────────────────────────────────────────────────────────────────────────
 alter table hotels enable row level security;
 alter table incidents enable row level security;
 alter table staff_tasks enable row level security;

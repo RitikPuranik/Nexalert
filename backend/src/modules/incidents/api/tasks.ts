@@ -84,6 +84,17 @@ export async function PATCH(req: NextRequest, incidentId: string, taskId: string
 
   if (error || !updated) return NextResponse.json({ success: false, error: error?.message }, { status: 500 })
 
+  // Record presence when staff accepts or starts a task
+  // Seeds their presence record so the last-seen tracker knows they're active
+  if (action === 'accept' || action === 'start') {
+    upsertPresencePing({
+      userId:     user.id,
+      hotelId:    user.profile.hotel_id,
+      incidentId,
+      floor:      user.profile.floor_assignment ?? null,
+      zone:       user.profile.zone_assignment  ?? null,
+    }).catch(console.error)
+  }
 
   // Check if all tasks are done
   checkAllTasksDone(incidentId).catch(console.error)

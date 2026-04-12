@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ['@anthropic-ai/sdk'],
-  },
+  // Prevent webpack from bundling server-only packages that use Node.js built-ins
+  // This is the correct key for Next.js 15
+  serverExternalPackages: ['firebase-admin', '@google/genai'],
   async headers() {
     return [
       {

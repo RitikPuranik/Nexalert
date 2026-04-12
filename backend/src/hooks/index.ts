@@ -5,11 +5,29 @@
  *
  * Each hook maps to one module and owns its own channel.
  * Import only what your component needs.
+ *
+ * ⚠️  FIREBASE AUTH + RLS NOTE:
+ * These hooks use the Supabase anon key via getDb(). Since this project uses
+ * Firebase Authentication (not Supabase Auth), Supabase's auth.uid() returns
+ * NULL for all users, meaning RLS policies will block direct .select() queries.
+ *
+ * Two options for your frontend:
+ *
+ * Option A (Recommended for hackathon): Fetch initial data via API routes
+ *   (which use adminDb/service role), then use these hooks ONLY for the
+ *   Supabase Realtime .channel() subscriptions to get live updates.
+ *   On a realtime event, re-fetch from your API route.
+ *
+ * Option B: Add service role key to client (NOT recommended for production).
+ *
+ * The Realtime channel subscriptions themselves work fine — only the
+ * initial .select() queries are affected by RLS.
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { getDb } from '@/core/db'
 import type { Incident, StaffTask, GuestLocation, GuestNotification } from '@/types'
+
 
 // ─── Incidents Module Hooks ────────────────────────────────────────────────────
 
