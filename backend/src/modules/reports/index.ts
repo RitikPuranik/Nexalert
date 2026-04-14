@@ -180,6 +180,183 @@ export async function GET_DRILLS(req: NextRequest) {
   return NextResponse.json<ApiResponse<unknown[]>>({ success: true, data: drills })
 }
 
+/** GET /api/reports/drills/score?drill_id= — drill scorecard with NFPA benchmarks */
+export async function GET_DRILL_SCORE(req: NextRequest) {
+  const user = await getRequestUser(req)
+  if (!user || !hasRole(user, ['manager'])) return AuthError.forbidden()
+
+  const drillId = new URL(req.url).searchParams.get('drill_id')
+  if (!drillId) return NextResponse.json({ success: false, error: 'drill_id required' }, { status: 400 })
+
+  const score = await scoreDrill(drillId, user.profile.hotel_id)
+  if (!score) return NextResponse.json({ success: false, error: 'Drill not found' }, { status: 404 })
+
+  return NextResponse.json<ApiResponse<typeof score>>({ success: true, data: score })
+}
+
+// ─── NFPA Benchmark Scorecard ─────────────────────────────────────────────────
+
+/** NFPA 72/101 emergency response benchmarks */
+const BENCHMARKS = {
+  first_response_seconds: 60,       // Staff should respond within 60s
+  full_evacuation_seconds: 300,      // Full evacuation within 5 minutes
+  task_completion_rate: 90,          // 90% of tasks should be completed
+  notification_delivery_rate: 95,    // 95% of notifications should reach guests
+}
+
+function letterGrade(score: number): string {
+  if (score >= 90) return 'A'
+  if (score >= 80) return 'B'
+  if (score >= 70) return 'C'
+  if (score >= 60) return 'D'
+  return 'F'
+}
+
+async function scoreDrill(drillId: string, hotelId: string) {
+  const { data: drill } = await adminDb
+    .from('incidents')
+    .select('id, type, floor, zone, detected_at, resolved_at, hotel_id, is_drill')
+    .eq('id', drillId)
+    .eq('hotel_id', hotelId)
+    .eq('is_drill', true)
+    .single()
+
+  if (!drill) return null
+
+  const [tasksRes, notifsRes] = await Promise.all([
+    adminDb.from('staff_tasks').select('status, accepted_at, completed_at').eq('incident_id', drillId),
+    adminDb.from('guest_notifications').select('status, guest_response').eq('incident_id', drillId),
+  ])
+
+  const tasks = tasksRes.data ?? []
+  const notifs = notifsRes.data ?? []
+  const base = new Date(drill.detected_at).getTime()
+
+  // First response time
+  const acceptedTasks = tasks
+    .filter((t: { accepted_at: string | null }) => t.accepted_at)
+    .sort((a: { accepted_at: string }, b: { accepted_at: string }) =>
+      new Date(a.accepted_at).getTime() - new Date(b.accepted_at).getTime())
+
+  const firstResponseMs = acceptedTasks.length
+    ? new Date((acceptedTasks[0] as { accepted_at: string }).accepted_at).getTime() - base
+    : null
+  const firstResponseSeconds = firstResponseMs ? Math.round(firstResponseMs / 1000) : null
+
+  // Duration (detection → resolution)
+  const durationMs = drill.resolved_at
+    ? new Date(drill.resolved_at).getTime() - base : null
+  const durationSeconds = durationMs ? Math.round(durationMs / 1000) : null
+
+  // Task completion
+  const tasksTotal = tasks.length
+  const tasksCompleted = tasks.filter((t: { status: string }) => t.status === 'completed').length
+  const taskCompletionRate = tasksTotal ? Math.round((tasksCompleted / tasksTotal) * 100) : 0
+
+  // Notification delivery
+  const notifsTotal = notifs.length
+  const notifsDelivered = notifs.filter((n: { status: string }) => ['sent', 'delivered'].includes(n.status)).length
+  const notifDeliveryRate = notifsTotal ? Math.round((notifsDelivered / notifsTotal) * 100) : 0
+
+  // Guest response rate
+  const guestsSafe = notifs.filter((n: { guest_response: string | null }) => n.guest_response === 'safe').length
+
+  // Score each dimension (0-100)
+  const scores = {
+    first_response: firstResponseSeconds !== null
+      ? Math.max(0, 100 - Math.round(((firstResponseSeconds - BENCHMARKS.first_response_seconds) / BENCHMARKS.first_response_seconds) * 100))
+      : 0,
+    evacuation_time: durationSeconds !== null
+      ? Math.max(0, 100 - Math.round(((durationSeconds - BENCHMARKS.full_evacuation_seconds) / BENCHMARKS.full_evacuation_seconds) * 100))
+      : 0,
+    task_completion: taskCompletionRate,
+    notification_delivery: notifDeliveryRate,
+  }
+
+  // Weighted overall score
+  const overallScore = Math.round(
+    scores.first_response * 0.30 +
+    scores.evacuation_time * 0.25 +
+    scores.task_completion * 0.25 +
+    scores.notification_delivery * 0.20
+  )
+
+  return {
+    drill_id: drillId,
+    type: drill.type,
+    floor: drill.floor,
+    zone: drill.zone,
+    conducted_at: drill.detected_at,
+
+    overall_score: overallScore,
+    overall_grade: letterGrade(overallScore),
+
+    dimensions: {
+      first_response: {
+        score: scores.first_response,
+        grade: letterGrade(scores.first_response),
+        actual_seconds: firstResponseSeconds,
+        benchmark_seconds: BENCHMARKS.first_response_seconds,
+        met_benchmark: firstResponseSeconds !== null && firstResponseSeconds <= BENCHMARKS.first_response_seconds,
+      },
+      evacuation_time: {
+        score: scores.evacuation_time,
+        grade: letterGrade(scores.evacuation_time),
+        actual_seconds: durationSeconds,
+        benchmark_seconds: BENCHMARKS.full_evacuation_seconds,
+        met_benchmark: durationSeconds !== null && durationSeconds <= BENCHMARKS.full_evacuation_seconds,
+      },
+      task_completion: {
+        score: scores.task_completion,
+        grade: letterGrade(scores.task_completion),
+        completed: tasksCompleted,
+        total: tasksTotal,
+        benchmark_rate: BENCHMARKS.task_completion_rate,
+        met_benchmark: taskCompletionRate >= BENCHMARKS.task_completion_rate,
+      },
+      notification_delivery: {
+        score: scores.notification_delivery,
+        grade: letterGrade(scores.notification_delivery),
+        delivered: notifsDelivered,
+        total: notifsTotal,
+        guests_confirmed_safe: guestsSafe,
+        benchmark_rate: BENCHMARKS.notification_delivery_rate,
+        met_benchmark: notifDeliveryRate >= BENCHMARKS.notification_delivery_rate,
+      },
+    },
+
+    benchmarks_used: 'NFPA 72 / NFPA 101',
+    recommendations: generateDrillRecommendations(scores, firstResponseSeconds, durationSeconds, taskCompletionRate),
+  }
+}
+
+function generateDrillRecommendations(
+  scores: Record<string, number>,
+  firstResponse: number | null,
+  duration: number | null,
+  taskRate: number
+): string[] {
+  const recs: string[] = []
+
+  if (scores.first_response < 70) {
+    recs.push(`First response was ${firstResponse ?? '?'}s — NFPA standard is 60s. Consider adding more staff to the duty roster or relocating staff break areas closer to high-risk zones.`)
+  }
+  if (scores.evacuation_time < 70) {
+    recs.push(`Total drill time was ${duration ?? '?'}s — NFPA target is 300s. Review evacuation routes for bottlenecks and conduct stairwell-specific drills.`)
+  }
+  if (taskRate < 80) {
+    recs.push(`Only ${taskRate}% of tasks were completed. Ensure all on-duty staff have push notifications enabled and have practiced the task acceptance flow.`)
+  }
+  if (scores.notification_delivery < 80) {
+    recs.push('Guest notification delivery was below 80%. Verify SMS provider configuration and consider adding PA system integration as a backup channel.')
+  }
+  if (recs.length === 0) {
+    recs.push('Excellent drill performance! All metrics met NFPA benchmarks. Consider increasing drill complexity by adding multi-floor scenarios or mobility-impaired guest actors.')
+  }
+
+  return recs
+}
+
 // ─── Metric helpers ───────────────────────────────────────────────────────────
 function buildTimeline(
   incident: Record<string, unknown>,
@@ -241,3 +418,4 @@ function computeTaskSummary(tasks: Record<string, unknown>[]) {
     unaccepted: tasks.filter(t => t.status === 'pending').map(t => t.task_text as string),
   }
 }
+

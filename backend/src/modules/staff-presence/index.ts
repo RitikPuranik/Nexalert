@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/core/db'
 import { getRequestUser, hasRole, AuthError } from '@/core/auth'
+import { emitCrisisEvent } from '@/core/events'
 import type { ApiResponse } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -80,15 +81,15 @@ export async function upsertPresencePing(payload: {
     .from('staff_presence')
     .upsert(
       {
-        user_id:     payload.userId,
-        hotel_id:    payload.hotelId,
+        user_id: payload.userId,
+        hotel_id: payload.hotelId,
         incident_id: payload.incidentId,
         last_ping_at: now,
-        floor:       payload.floor ?? null,
-        zone:        payload.zone  ?? null,
-        status:      'active',
+        floor: payload.floor ?? null,
+        zone: payload.zone ?? null,
+        status: 'active',
         silent_since: null,
-        updated_at:  now,
+        updated_at: now,
       },
       { onConflict: 'user_id,incident_id' }
     )
@@ -138,14 +139,23 @@ export async function checkStalePresence(
         .single()
 
       alerts.push({
-        user_id:          row.user_id,
-        name:             profile?.name ?? 'Staff',
-        staff_role:       profile?.staff_role ?? 'staff',
-        floor:            row.floor ?? profile?.floor_assignment ?? null,
-        zone:             row.zone  ?? profile?.zone_assignment  ?? null,
+        user_id: row.user_id,
+        name: profile?.name ?? 'Staff',
+        staff_role: profile?.staff_role ?? 'staff',
+        floor: row.floor ?? profile?.floor_assignment ?? null,
+        zone: row.zone ?? profile?.zone_assignment ?? null,
         silent_for_seconds: silentSeconds,
-        open_task:        openTask?.task_text ?? null,
+        open_task: openTask?.task_text ?? null,
       })
+
+      emitCrisisEvent('staff:silent', hotelId, {
+        user_id: row.user_id,
+        name: profile?.name ?? 'Staff',
+        staff_role: profile?.staff_role ?? 'staff',
+        floor: row.floor, zone: row.zone,
+        silent_for_seconds: silentSeconds,
+        open_task: openTask?.task_text ?? null,
+      }, incidentId)
     }
   }
 
@@ -214,20 +224,20 @@ export async function getIncidentPresence(
     const hasOpenTask = myTasks.some(t => ['accepted', 'in_progress'].includes(t.status))
 
     return {
-      user_id:             row.user_id,
-      name:                profile?.name       ?? 'Staff member',
-      staff_role:          profile?.staff_role ?? 'staff',
-      phone:               profile?.phone      ?? null,
-      floor:               row.floor ?? profile?.floor_assignment ?? null,
-      zone:                row.zone  ?? profile?.zone_assignment  ?? null,
-      status:              row.status as 'active' | 'silent' | 'offline',
-      last_ping_at:        row.last_ping_at,
-      seconds_since_ping:  secondsSincePing,
-      silent_for_seconds:  silentForSeconds,
-      assigned_tasks:      myTasks.map(t => ({
-        task_text:  t.task_text,
-        status:     t.status,
-        priority:   t.priority,
+      user_id: row.user_id,
+      name: profile?.name ?? 'Staff member',
+      staff_role: profile?.staff_role ?? 'staff',
+      phone: profile?.phone ?? null,
+      floor: row.floor ?? profile?.floor_assignment ?? null,
+      zone: row.zone ?? profile?.zone_assignment ?? null,
+      status: row.status as 'active' | 'silent' | 'offline',
+      last_ping_at: row.last_ping_at,
+      seconds_since_ping: secondsSincePing,
+      silent_for_seconds: silentForSeconds,
+      assigned_tasks: myTasks.map(t => ({
+        task_text: t.task_text,
+        status: t.status,
+        priority: t.priority,
         accepted_at: t.accepted_at,
       })),
       needs_welfare_check: row.status === 'silent' && hasOpenTask,
@@ -253,11 +263,11 @@ export async function POST_PING(req: NextRequest) {
   }
 
   await upsertPresencePing({
-    userId:     user.id,
-    hotelId:    user.profile.hotel_id,
+    userId: user.id,
+    hotelId: user.profile.hotel_id,
     incidentId: incident_id,
-    floor:      floor ?? user.profile.floor_assignment ?? null,
-    zone:       zone  ?? user.profile.zone_assignment  ?? null,
+    floor: floor ?? user.profile.floor_assignment ?? null,
+    zone: zone ?? user.profile.zone_assignment ?? null,
   })
 
   return NextResponse.json<ApiResponse<{ pinged: boolean; at: string }>>({
@@ -290,12 +300,12 @@ export async function GET_PRESENCE(req: NextRequest) {
       welfare_check_needed: {
         count: welfareChecks.length,
         staff: welfareChecks.map(s => ({
-          name:               s.name,
-          role:               s.staff_role,
-          floor:              s.floor,
-          zone:               s.zone,
+          name: s.name,
+          role: s.staff_role,
+          floor: s.floor,
+          zone: s.zone,
           silent_for_seconds: s.silent_for_seconds,
-          open_task:          s.assigned_tasks.find(t => ['accepted','in_progress'].includes(t.status))?.task_text ?? null,
+          open_task: s.assigned_tasks.find(t => ['accepted', 'in_progress'].includes(t.status))?.task_text ?? null,
         })),
       },
     },

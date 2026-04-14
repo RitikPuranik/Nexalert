@@ -217,6 +217,8 @@ export interface RoomHeatmapEntry {
   seconds_waiting: number | null
   responded_at: string | null
   guest_response: string | null
+  deadman_status: string | null
+  deadman_missed_pings: number | null
 }
 
 export interface FloorHeatmapResult {
@@ -233,6 +235,34 @@ export interface FloorHeatmapResult {
     unreachable: number
     empty: number
   }
+}
+
+// ─── Staff presence ────────────────────────────────────────────────────────────
+// ─── Incident Timeline ──────────────────────────────────────────────────────
+export interface TimelineEvent {
+  timestamp: string
+  event: string
+  actor: string
+  category: 'system' | 'ai' | 'staff' | 'guest' | 'sensor' | 'notification'
+  severity?: 'info' | 'warning' | 'critical'
+  elapsed_seconds: number
+  elapsed_formatted: string
+  metadata?: Record<string, unknown>
+}
+
+// ─── Floor Plan ──────────────────────────────────────────────────────────────
+export interface FloorPlan {
+  id: string
+  hotel_id: string
+  floor: number
+  svg_url: string | null
+  width_px: number
+  height_px: number
+  rooms: { room_number: string; x: number; y: number; w: number; h: number; zone: string }[]
+  exits: { id: string; label: string; x: number; y: number; type: string; accessible: boolean }[]
+  hazard_zones: unknown[]
+  aed_locations: unknown[]
+  muster_points: { id: string; label: string; location_description: string; x: number; y: number }[]
 }
 
 // ─── Staff presence ────────────────────────────────────────────────────────────

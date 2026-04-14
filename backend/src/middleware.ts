@@ -2,11 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 
 // Routes fully public — no token needed at all
 const PUBLIC_ROUTES = [
-  '/api/incidents/sos',
-  '/api/guests/exit-route',
-  '/api/responder/portal',
+  '/api/health',              // system status check
+  '/api/stats',               // operational KPIs (hackathon demo)
+  '/api/sse',                 // real-time event stream (SSE)
+  '/api/incidents/sos',       // guest SOS submission (QR scan)
+  '/api/guests/exit-route',   // personalized exit route (QR scan)
+  '/api/guests/register',     // guest self-registration (QR scan)
+  '/api/responder/portal',    // first responder situational view
   '/api/sensors/event',       // uses sensor secret, not JWT
   '/api/heatmap',             // used by responder portal too
+  '/api/cron/check',          // uses cron secret or JWT
   '/api/deadman/start',       // called from guest SOS flow (no auth)
   '/api/deadman/ping',        // guest taps "I'm okay" (no auth, uses token)
   '/api/deadman/status',      // guest polls session status (no auth, uses token)

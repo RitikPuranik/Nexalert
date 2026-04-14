@@ -18,6 +18,25 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<{ success:
   return res.json()
 }
 
+// ─── Health & Stats ───────────────────────────────────────────────────────────
+export const systemApi = {
+  /** System health check — no auth */
+  health: () => call<{
+    service: string; version: string; status: string; uptime_seconds: number
+    services: Record<string, string>; capabilities: string[]
+  }>('/api/health'),
+
+  /** Real-time statistics — no auth, pass hotel_id */
+  stats: (hotelId: string) => call<unknown>(`/api/stats?hotel_id=${hotelId}`),
+
+  /** SSE event stream — returns EventSource URL (client should use new EventSource(url)) */
+  sseUrl: (hotelId: string, incidentId?: string) => {
+    const q = new URLSearchParams({ hotel_id: hotelId })
+    if (incidentId) q.set('incident_id', incidentId)
+    return `/api/sse?${q}`
+  },
+}
+
 // ─── Incidents ────────────────────────────────────────────────────────────────
 export const incidentsApi = {
   /** List active/all incidents. Manager/staff/responder see all; guests see their floor. */
@@ -35,6 +54,16 @@ export const incidentsApi = {
   /** Confirm, investigate, dismiss, resolve, or escalate to 911 */
   action: (token: string, id: string, action: 'confirm' | 'investigate' | 'dismiss' | 'resolve' | 'escalate_911') =>
     call<Incident>(`/api/incidents/${id}`, { method: 'PATCH', headers: h(token), body: JSON.stringify({ action }) }),
+
+  /** Get full incident timeline / audit trail */
+  timeline: (token: string, id: string) =>
+    call<{
+      incident_id: string; incident_type: string; severity: number | null
+      total_events: number; events: {
+        timestamp: string; event: string; actor: string
+        category: string; severity?: string; elapsed_seconds: number; elapsed_formatted: string
+      }[]
+    }>(`/api/incidents/${id}/timeline`, { headers: h(token) }),
 }
 
 // ─── SOS (Guest) ──────────────────────────────────────────────────────────────
@@ -46,6 +75,7 @@ export const sosApi = {
   }) => call<{
     incident_id: string; is_new: boolean; severity: number | null
     alert_text: string; evacuation_instruction: string; exit_route: unknown
+    deadman_token: string | null
   }>('/api/incidents/sos', { method: 'POST', headers: h(), body: JSON.stringify(payload) }),
 
   /** Poll for triage completion after SOS */
@@ -73,7 +103,7 @@ export const tasksApi = {
 export const sensorsApi = {
   /** Trigger a sensor event (from simulator panel or real hardware) */
   trigger: (params: {
-    sensor_id: string; hotel_id: string; type: 'smoke' | 'heat' | 'gas'
+    sensor_id: string; hotel_id: string; type: 'smoke' | 'heat' | 'gas' | 'motion'
     value: number; threshold: number; floor: number; zone: string; room?: string
   }) => fetch('/api/sensors/event', {
     method: 'POST',
@@ -226,4 +256,39 @@ export const presenceApi = {
       '/api/staff/presence/check',
       { method: 'POST', headers: h(token), body: JSON.stringify({ incident_id: incidentId }) }
     ),
+}
+
+// ─── Guest Registration ───────────────────────────────────────────────────────────────
+export const guestRegistrationApi = {
+  /** Guest self-registration via QR code — no auth */
+  register: (payload: {
+    hotel_id: string; room: string; floor: number; zone: string
+    guest_name: string; language?: string; phone?: string; needs_accessibility?: boolean
+  }) => call<{ guest_location_id: string; registered: boolean; updated: boolean; message: string }>(
+    '/api/guests/register', { method: 'POST', headers: h(), body: JSON.stringify(payload) }
+  ),
+}
+
+// ─── War Room ─────────────────────────────────────────────────────────────────────
+export const warRoomApi = {
+  /** Single endpoint with entire crisis state — manager/responder auth */
+  get: (token: string, incidentId: string) =>
+    call<unknown>(`/api/warroom?incident_id=${incidentId}`, { headers: h(token) }),
+}
+
+// ─── Cron ────────────────────────────────────────────────────────────────────────
+export const cronApi = {
+  /** Background check — runs deadman + staff presence checks for all active incidents */
+  check: (cronSecret: string) =>
+    fetch('/api/cron/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-cron-secret': cronSecret },
+    }).then(r => r.json()),
+}
+
+// ─── Drill Scorecard ───────────────────────────────────────────────────────────────
+export const drillScoreApi = {
+  /** Get NFPA-benchmarked drill scorecard — manager auth */
+  score: (token: string, drillId: string) =>
+    call<unknown>(`/api/reports/drills/score?drill_id=${drillId}`, { headers: h(token) }),
 }

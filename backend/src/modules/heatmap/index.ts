@@ -40,6 +40,10 @@ export interface RoomHeatmapEntry {
   seconds_waiting: number | null
   responded_at: string | null
   guest_response: string | null
+  /** Dead man's switch status — null if no session, 'active' or 'escalated' */
+  deadman_status: string | null
+  /** Number of missed pings — null if no session */
+  deadman_missed_pings: number | null
 }
 
 export interface FloorHeatmapResult {
@@ -65,26 +69,31 @@ export async function computeFloorHeatmap(
   floor: number,
   incidentId: string
 ): Promise<FloorHeatmapResult> {
-  // Load all guest locations on this floor
-  const { data: guests } = await adminDb
-    .from('guest_locations')
-    .select('id, room_number, floor, zone, guest_name, language, needs_accessibility_assistance, guest_response, responded_at, notification_status')
-    .eq('hotel_id', hotelId)
-    .eq('floor', floor)
-
-  // Load notifications for this incident (to get sent_at timestamps)
-  const { data: notifs } = await adminDb
-    .from('guest_notifications')
-    .select('guest_location_id, status, sent_at, delivered_at, guest_response, responded_at')
-    .eq('incident_id', incidentId)
-
-  // Load floor plan rooms so we know which rooms exist even with no guests
-  const { data: floorPlan } = await adminDb
-    .from('floor_plans')
-    .select('rooms')
-    .eq('hotel_id', hotelId)
-    .eq('floor', floor)
-    .single()
+  // Load all guest locations on this floor + deadman sessions in parallel
+  const [{ data: guests }, { data: notifs }, { data: floorPlan }, { data: deadmanSessions }] = await Promise.all([
+    adminDb
+      .from('guest_locations')
+      .select('id, room_number, floor, zone, guest_name, language, needs_accessibility_assistance, guest_response, responded_at, notification_status')
+      .eq('hotel_id', hotelId)
+      .eq('floor', floor),
+    adminDb
+      .from('guest_notifications')
+      .select('guest_location_id, status, sent_at, delivered_at, guest_response, responded_at')
+      .eq('incident_id', incidentId),
+    adminDb
+      .from('floor_plans')
+      .select('rooms')
+      .eq('hotel_id', hotelId)
+      .eq('floor', floor)
+      .single(),
+    // NEW: deadman sessions for this floor + incident
+    adminDb
+      .from('deadman_sessions')
+      .select('room_number, status, missed_pings, last_ping_at, escalated_at, guest_location_id')
+      .eq('hotel_id', hotelId)
+      .eq('floor', floor)
+      .in('status', ['active', 'escalated']),
+  ])
 
   const now = Date.now()
   const notifByGuestLocation = new Map(
@@ -111,6 +120,18 @@ export async function computeFloorHeatmap(
       responded_at: string | null
       notification_status: string | null
     }) => [g.room_number, g])
+  )
+
+  // Build deadman lookup by room number
+  const deadmanByRoom = new Map(
+    (deadmanSessions ?? []).map((d: {
+      room_number: string
+      status: string
+      missed_pings: number
+      last_ping_at: string
+      escalated_at: string | null
+      guest_location_id: string | null
+    }) => [d.room_number, d])
   )
 
   // Get all room numbers from floor plan + occupied rooms
@@ -143,17 +164,27 @@ export async function computeFloorHeatmap(
         seconds_waiting: null,
         responded_at: null,
         guest_response: null,
+        deadman_status: null,
+        deadman_missed_pings: null,
       }
     }
 
     const notif = notifByGuestLocation.get(guest.id)
+    const deadman = deadmanByRoom.get(roomNumber)
 
-    // Determine status
+    // Determine status — deadman escalation takes priority
     let status: RoomStatus
     let colour: RoomHeatmapEntry['colour']
     let secondsWaiting: number | null = null
 
-    if (guest.guest_response === 'safe') {
+    // DEADMAN ESCALATION OVERRIDE — highest priority
+    if (deadman?.status === 'escalated') {
+      status = 'needs_help'
+      colour = 'red'
+      if (deadman.escalated_at) {
+        secondsWaiting = Math.floor((now - new Date(deadman.escalated_at).getTime()) / 1000)
+      }
+    } else if (guest.guest_response === 'safe') {
       status = 'safe'
       colour = 'green'
     } else if (guest.guest_response === 'needs_help') {
@@ -177,28 +208,30 @@ export async function computeFloorHeatmap(
     }
 
     return {
-      room_number:          roomNumber,
+      room_number: roomNumber,
       floor,
-      zone:                 guest.zone,
+      zone: guest.zone,
       status,
       colour,
-      guest_name:           guest.guest_name,
-      language:             guest.language,
-      needs_accessibility:  guest.needs_accessibility_assistance,
+      guest_name: guest.guest_name,
+      language: guest.language,
+      needs_accessibility: guest.needs_accessibility_assistance,
       notification_sent_at: notif?.sent_at ?? null,
-      seconds_waiting:      secondsWaiting,
-      responded_at:         guest.responded_at,
-      guest_response:       guest.guest_response,
+      seconds_waiting: secondsWaiting,
+      responded_at: guest.responded_at,
+      guest_response: guest.guest_response,
+      deadman_status: deadman?.status ?? null,
+      deadman_missed_pings: deadman?.missed_pings ?? null,
     }
   })
 
   const summary = {
-    total:        rooms.length,
-    safe:         rooms.filter(r => r.status === 'safe').length,
-    needs_help:   rooms.filter(r => r.status === 'needs_help').length,
-    no_response:  rooms.filter(r => r.status === 'no_response').length,
-    unreachable:  rooms.filter(r => r.status === 'unreachable').length,
-    empty:        rooms.filter(r => r.status === 'empty').length,
+    total: rooms.length,
+    safe: rooms.filter(r => r.status === 'safe').length,
+    needs_help: rooms.filter(r => r.status === 'needs_help').length,
+    no_response: rooms.filter(r => r.status === 'no_response').length,
+    unreachable: rooms.filter(r => r.status === 'unreachable').length,
+    empty: rooms.filter(r => r.status === 'empty').length,
   }
 
   return {
@@ -222,8 +255,8 @@ export async function computeFloorHeatmap(
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
-  const hotelId    = searchParams.get('hotel_id')
-  const floor      = searchParams.get('floor')
+  const hotelId = searchParams.get('hotel_id')
+  const floor = searchParams.get('floor')
   const incidentId = searchParams.get('incident_id')
 
   if (!hotelId || !floor || !incidentId) {

@@ -5,13 +5,33 @@ import { createGuestIncident, runTriagePipeline } from '@/modules/incidents/serv
 import { getExitRouteForRoom, upsertGuestLocation } from '@/modules/guests/service'
 import type { ApiResponse } from '@/types'
 import { createDeadmanSession } from '@/modules/deadman'
+import { rateLimit, getClientIp } from '@/core/rate-limit'
 
 export const dynamic = 'force-dynamic'
+
+// Valid incident types that can come from guest SOS
+const VALID_TYPES = ['fire', 'smoke', 'medical', 'security', 'gas_leak', 'power_outage', 'flood', 'other']
 
 // POST /api/incidents/sos
 // No auth required — works from QR scan (anonymous guest)
 export async function POST(req: NextRequest) {
-  const body = await req.json()
+  // Rate limit: max 10 SOS per minute per IP
+  const ip = getClientIp(req)
+  const limit = rateLimit(`sos:${ip}`, 10)
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Too many requests. Please wait before submitting again.', code: 'RATE_LIMITED' },
+      { status: 429, headers: { 'Retry-After': String(Math.ceil((limit.resetAt - Date.now()) / 1000)) } }
+    )
+  }
+
+  let body: Record<string, unknown>
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 })
+  }
+
   const {
     hotel_id, type, room, floor, zone = 'main',
     language = 'en', guest_name, phone, needs_accessibility = false,
@@ -21,9 +41,33 @@ export async function POST(req: NextRequest) {
     phone?: string; needs_accessibility?: boolean
   }
 
-  if (!hotel_id || !type || !room || !floor) {
-    return NextResponse.json({ success: false, error: 'hotel_id, type, room, floor required' }, { status: 400 })
+  // Input validation
+  if (!hotel_id || !type || !room || floor === undefined || floor === null) {
+    return NextResponse.json(
+      { success: false, error: 'hotel_id, type, room, and floor are required' },
+      { status: 400 }
+    )
   }
+
+  if (!VALID_TYPES.includes(type)) {
+    return NextResponse.json(
+      { success: false, error: `Invalid type. Must be one of: ${VALID_TYPES.join(', ')}` },
+      { status: 400 }
+    )
+  }
+
+  if (typeof floor !== 'number' || floor < 0 || floor > 200) {
+    return NextResponse.json(
+      { success: false, error: 'floor must be a valid number (0-200)' },
+      { status: 400 }
+    )
+  }
+
+  // Sanitize string inputs
+  const sanitizedRoom = String(room).slice(0, 20).trim()
+  const sanitizedZone = String(zone).slice(0, 50).trim()
+  const sanitizedName = guest_name ? String(guest_name).slice(0, 100).trim() : undefined
+  const sanitizedLang = String(language).slice(0, 5).trim()
 
   const user = await getRequestUser(req).catch(() => null)
 
@@ -31,13 +75,14 @@ export async function POST(req: NextRequest) {
   await upsertGuestLocation({
     hotelId: hotel_id,
     guestId: user?.id,
-    guestName: guest_name ?? user?.profile?.name ?? 'Guest',
-    room, floor, zone, language, phone, needsAccessibility: needs_accessibility,
+    guestName: sanitizedName ?? user?.profile?.name ?? 'Guest',
+    room: sanitizedRoom, floor, zone: sanitizedZone,
+    language: sanitizedLang, phone, needsAccessibility: needs_accessibility,
   })
 
   // Return immediate exit route — before AI triage completes
   const { instruction, route, pathCoordinates } = await getExitRouteForRoom(
-    hotel_id, floor, room, zone, language, needs_accessibility, []
+    hotel_id, floor, sanitizedRoom, sanitizedZone, sanitizedLang, needs_accessibility, []
   )
 
   // Check for existing active incident on this floor
@@ -55,7 +100,7 @@ export async function POST(req: NextRequest) {
         incident_id: existing.id,
         is_new: false,
         severity: existing.severity,
-        alert_text: translations[language] ?? existing.ai_guest_alert_en ?? 'Follow evacuation procedures.',
+        alert_text: translations[sanitizedLang] ?? existing.ai_guest_alert_en ?? 'Follow evacuation procedures.',
         evacuation_instruction: instruction,
         exit_route: routeSummary(route, pathCoordinates),
         deadman_token: null,
@@ -65,9 +110,9 @@ export async function POST(req: NextRequest) {
 
   // Create new incident and run triage pipeline async
   const incident = await createGuestIncident({
-    hotelId: hotel_id, type, floor, zone, room,
+    hotelId: hotel_id, type, floor, zone: sanitizedZone, room: sanitizedRoom,
     reporterId: user?.id ?? null,
-    reporterLanguage: language,
+    reporterLanguage: sanitizedLang,
   })
 
   // Auto-create dead man's switch session immediately after SOS
@@ -78,19 +123,19 @@ export async function POST(req: NextRequest) {
       .from('guest_locations')
       .select('id')
       .eq('hotel_id', hotel_id)
-      .eq('room_number', room)
+      .eq('room_number', sanitizedRoom)
       .eq('floor', floor)
       .order('last_seen_at', { ascending: false })
       .limit(1)
       .single()
 
     const dm = await createDeadmanSession({
-      incidentId:       incident.id,
-      hotelId:          hotel_id,
-      guestLocationId:  guestLoc?.id ?? null,
-      room,
+      incidentId: incident.id,
+      hotelId: hotel_id,
+      guestLocationId: guestLoc?.id ?? null,
+      room: sanitizedRoom,
       floor,
-      intervalSeconds:  120,
+      intervalSeconds: 120,
     })
     deadmanToken = dm.session_token
   } catch (err) {
@@ -105,7 +150,7 @@ export async function POST(req: NextRequest) {
       incident_id: incident.id,
       is_new: true,
       severity: null,
-      alert_text: 'Your report has been received. Help is on the way.',
+      alert_text: 'Your report has been received. Help is on the way. Stay calm and follow the evacuation instructions below.',
       evacuation_instruction: instruction,
       exit_route: routeSummary(route, pathCoordinates),
       deadman_token: deadmanToken,

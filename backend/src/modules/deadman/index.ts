@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/core/db'
 import { getRequestUser, hasRole, AuthError } from '@/core/auth'
+import { emitCrisisEvent } from '@/core/events'
 import type { ApiResponse } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -57,17 +58,17 @@ export async function createDeadmanSession(payload: {
   const { data, error } = await adminDb
     .from('deadman_sessions')
     .insert({
-      incident_id:       payload.incidentId,
-      hotel_id:          payload.hotelId,
+      incident_id: payload.incidentId,
+      hotel_id: payload.hotelId,
       guest_location_id: payload.guestLocationId,
-      room_number:       payload.room,
-      floor:             payload.floor,
-      session_token:     token,
-      status:            'active',
-      interval_seconds:  payload.intervalSeconds ?? 120,
-      missed_pings:      0,
-      escalate_after:    2,
-      last_ping_at:      new Date().toISOString(),
+      room_number: payload.room,
+      floor: payload.floor,
+      session_token: token,
+      status: 'active',
+      interval_seconds: payload.intervalSeconds ?? 120,
+      missed_pings: 0,
+      escalate_after: 2,
+      last_ping_at: new Date().toISOString(),
     })
     .select()
     .single()
@@ -165,6 +166,11 @@ export async function checkSessions(hotelId: string): Promise<{
 
         escalatedCount++
         escalatedRooms.push(`Room ${s.room_number} (Floor ${s.floor})`)
+
+        emitCrisisEvent('deadman:escalated', hotelId, {
+          room: s.room_number, floor: s.floor,
+          missed_pings: newMissed, session_id: s.id,
+        })
       } else {
         await adminDb
           .from('deadman_sessions')
@@ -199,12 +205,12 @@ export async function POST_START(req: NextRequest) {
   }
 
   const session = await createDeadmanSession({
-    incidentId:       incident_id,
-    hotelId:          hotel_id,
-    guestLocationId:  body.guest_location_id ?? null,
+    incidentId: incident_id,
+    hotelId: hotel_id,
+    guestLocationId: body.guest_location_id ?? null,
     room,
     floor,
-    intervalSeconds:  body.interval_seconds ?? 120,
+    intervalSeconds: body.interval_seconds ?? 120,
   })
 
   return NextResponse.json<ApiResponse<{
@@ -215,10 +221,10 @@ export async function POST_START(req: NextRequest) {
   }>>({
     success: true,
     data: {
-      session_token:    session.session_token,
+      session_token: session.session_token,
       interval_seconds: session.interval_seconds,
-      next_ping_due:    new Date(Date.now() + session.interval_seconds * 1000).toISOString(),
-      message:          `Tap "I'm okay" every ${Math.round(session.interval_seconds / 60)} minutes so help knows you're safe.`,
+      next_ping_due: new Date(Date.now() + session.interval_seconds * 1000).toISOString(),
+      message: `Tap "I'm okay" every ${Math.round(session.interval_seconds / 60)} minutes so help knows you're safe.`,
     },
   }, { status: 201 })
 }
@@ -258,7 +264,7 @@ export async function GET_STATUS(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Session not found' }, { status: 404 })
   }
 
-  const elapsed   = Math.floor((Date.now() - new Date(session.last_ping_at).getTime()) / 1000)
+  const elapsed = Math.floor((Date.now() - new Date(session.last_ping_at).getTime()) / 1000)
   const remaining = Math.max(0, session.interval_seconds - elapsed)
 
   return NextResponse.json<ApiResponse<{
@@ -269,10 +275,10 @@ export async function GET_STATUS(req: NextRequest) {
   }>>({
     success: true,
     data: {
-      status:            session.status,
+      status: session.status,
       seconds_remaining: remaining,
-      missed_pings:      session.missed_pings,
-      escalated:         session.status === 'escalated',
+      missed_pings: session.missed_pings,
+      escalated: session.status === 'escalated',
     },
   })
 }
@@ -301,6 +307,10 @@ export async function POST_RESOLVE(req: NextRequest) {
     .update({ status: 'resolved', resolved_at: new Date().toISOString() })
     .eq('session_token', session_token)
     .eq('hotel_id', user.profile.hotel_id)
+
+  emitCrisisEvent('deadman:resolved', user.profile.hotel_id, {
+    session_token, resolved_by: user.id,
+  })
 
   return NextResponse.json<ApiResponse<{ resolved: boolean }>>({ success: true, data: { resolved: true } })
 }
@@ -332,9 +342,9 @@ export async function GET_ACTIVE(req: NextRequest) {
     const elapsed = Math.floor((now - new Date(s.last_ping_at).getTime()) / 1000)
     return {
       ...s,
-      seconds_since_last_ping:  elapsed,
-      seconds_until_overdue:    Math.max(0, s.interval_seconds - elapsed),
-      is_overdue:                elapsed > s.interval_seconds,
+      seconds_since_last_ping: elapsed,
+      seconds_until_overdue: Math.max(0, s.interval_seconds - elapsed),
+      is_overdue: elapsed > s.interval_seconds,
     }
   })
 
