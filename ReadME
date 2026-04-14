@@ -1,0 +1,26 @@
+src/
+├── types/index.ts           ← Every type mirrors your backend exactly
+├── lib/
+│   ├── api.ts               ← Full client for ALL backend endpoints
+│   └── utils.ts             ← Formatters (time, severity, status, roles)
+├── context/AuthContext.tsx  ← Auth state + 3 demo users (no Firebase needed for demo)
+├── hooks/index.ts           ← Polling hooks: useIncidents, useIncident,
+│                               useHeatmap, useStaffPresence, useDeadmanSessions
+├── components/
+│   ├── ui/index.tsx         ← Card, Button, Badge, Stat, Spinner, ProgressBar, etc.
+│   ├── Navbar.tsx           ← Sticky nav with live incident counter + ticker
+│   ├── IncidentCard.tsx     ← Severity-colored cards + compact rows
+│   ├── FloorHeatmap.tsx     ← Clickable room grid (green/amber/red/gray)
+│   ├── TaskList.tsx         ← Accept → Start → Complete task flow
+│   ├── StaffPresence.tsx    ← Live welfare tracker with silent alerts
+│   └── DeadmanWidget.tsx    ← SVG countdown ring with ping button
+└── app/
+    ├── page.tsx              → Login + 3 demo quick-access buttons
+    ├── dashboard/page.tsx    → Command center: metrics, live ticker, simulator
+    ├── dashboard/incidents/  → List with status filters
+    ├── dashboard/incidents/[id]/ → Full detail: AI briefing, tasks, heatmap, reports
+    ├── dashboard/staff/      → On-duty toggle + role breakdown
+    ├── dashboard/drills/     → Trigger drills + history with metrics
+    ├── dashboard/reports/    → AI compliance reports with timeline
+    ├── sos/                  → Mobile guest SOS → dead man's switch
+    └── responder/            → Public first responder portal (no auth)
