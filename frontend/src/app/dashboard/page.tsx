@@ -5,22 +5,27 @@ import { useAuth } from '@/context/AuthContext'
 import { useIncidents, useDeadmanSessions } from '@/hooks'
 import { IncidentCard, IncidentRow } from '@/components/IncidentCard'
 import { Card, Stat, SectionHeader, LiveDot, Badge, Button, EmptyState } from '@/components/ui'
-import { cn, statusLabel, statusColor, incidentTypeIcon, timeAgo } from '@/lib/utils'
+import { cn, statusLabel, incidentTypeIcon, timeAgo } from '@/lib/utils'
 import * as api from '@/lib/api'
 
 const INCIDENT_TYPES = ['fire', 'smoke', 'medical', 'security', 'gas_leak', 'flood', 'other']
+const DEMO_HOTEL_ID = 'hotel-001'
 
 export default function CommandDashboard() {
   const { user, token } = useAuth()
-  const { incidents, isLoading, refetch } = useIncidents()
+  const { incidents, isLoading, isDemoMode, refetch } = useIncidents()
   const deadmanSessions = useDeadmanSessions()
   const [simulating, setSimulating] = useState(false)
   const [simType, setSimType] = useState('fire')
   const [simFloor, setSimFloor] = useState(4)
   const [simMsg, setSimMsg] = useState<string | null>(null)
 
-  const active = incidents.filter(i => ['detecting','triaging','active','investigating'].includes(i.status))
-  const resolved = incidents.filter(i => ['resolved','false_alarm'].includes(i.status))
+  const active = incidents.filter(i =>
+    ['detecting', 'triaging', 'active', 'investigating'].includes(i.status)
+  )
+  const resolved = incidents.filter(i =>
+    ['resolved', 'false_alarm'].includes(i.status)
+  )
   const sev1 = incidents.filter(i => i.severity === 1).length
   const escalated = deadmanSessions.filter(s => s.status === 'escalated').length
 
@@ -31,7 +36,7 @@ export default function CommandDashboard() {
     try {
       const res = await api.sensors.event({
         sensor_id: `sim-${Date.now()}`,
-        hotel_id: user?.hotel_id ?? 'hotel-001',
+        hotel_id: DEMO_HOTEL_ID,
         type: simType,
         value: 85,
         threshold: 50,
@@ -39,13 +44,11 @@ export default function CommandDashboard() {
         zone: 'east_wing',
       })
       if (res.success) {
-        setSimMsg(`✓ Incident triggered — ID: ${res.data.incident_id.slice(0, 8)}...`)
+        setSimMsg(`✓ Incident triggered — ID: ${(res.data.incident_id ?? '').slice(0, 8)}...`)
         refetch()
       } else {
-        setSimMsg(`⚠ ${res.error} (backend may not be running — demo mode)`)
+        setSimMsg(`⚠ ${res.error}`)
       }
-    } catch {
-      setSimMsg('⚠ Backend not reachable — showing mock data')
     } finally {
       setSimulating(false)
     }
@@ -54,7 +57,18 @@ export default function CommandDashboard() {
   return (
     <div className="space-y-6 animate-fade-in">
 
-      {/* Ticker for active incidents */}
+      {/* Demo mode banner */}
+      {isDemoMode && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-violet-950/30 border border-violet-900/30">
+          <span className="text-violet-400 text-xs font-mono">◈</span>
+          <span className="text-xs font-mono text-violet-300/70">
+            DEMO MODE — Backend offline. Showing mock data. Connect backend at{' '}
+            <code className="text-violet-300">NEXT_PUBLIC_API_URL</code> to go live.
+          </span>
+        </div>
+      )}
+
+      {/* Live ticker */}
       {active.length > 0 && (
         <div className="overflow-hidden bg-red-950/20 border border-red-900/30 rounded-lg h-9 flex items-center">
           <div className="flex-shrink-0 flex items-center gap-2 px-4 border-r border-red-900/30 h-full">
@@ -99,12 +113,10 @@ export default function CommandDashboard() {
           <SectionHeader
             title="Active Incidents"
             subtitle={`${active.length} ongoing`}
-            right={
-              <Button size="sm" variant="ghost" onClick={refetch}>↻ Refresh</Button>
-            }
+            right={<Button size="sm" variant="ghost" onClick={refetch}>↻ Refresh</Button>}
           />
           {isLoading ? (
-            <div className="text-xs font-mono text-white/25 animate-pulse py-8 text-center">Loading...</div>
+            <div className="text-xs font-mono text-white/25 animate-pulse text-center py-8">Loading...</div>
           ) : active.length === 0 ? (
             <Card className="p-6">
               <EmptyState icon="◎" title="No active incidents" subtitle="All clear — monitoring sensors" />
@@ -128,9 +140,7 @@ export default function CommandDashboard() {
                       <div className="flex items-center gap-2">
                         {s.status === 'escalated' && <Badge variant="amber">ESCALATED</Badge>}
                         <span className="text-[10px] font-mono text-white/25">
-                          {s.seconds_until_overdue !== undefined && s.seconds_until_overdue > 0
-                            ? `${s.seconds_until_overdue}s left`
-                            : 'Overdue'}
+                          {(s.seconds_until_overdue ?? 0) > 0 ? `${s.seconds_until_overdue}s left` : 'Overdue'}
                         </span>
                       </div>
                     </div>
@@ -151,30 +161,18 @@ export default function CommandDashboard() {
               <div className="space-y-3">
                 <div>
                   <label className="text-[10px] font-mono text-white/30 uppercase mb-1.5 block">Incident Type</label>
-                  <select
-                    value={simType}
-                    onChange={e => setSimType(e.target.value)}
-                    className="w-full bg-[#0d1117] border border-white/10 rounded px-3 py-2 text-xs font-mono text-white/70 focus:outline-none"
-                  >
-                    {INCIDENT_TYPES.map(t => (
-                      <option key={t} value={t}>{t.replace('_',' ')}</option>
-                    ))}
+                  <select value={simType} onChange={e => setSimType(e.target.value)}
+                    className="w-full bg-[#0d1117] border border-white/10 rounded px-3 py-2 text-xs font-mono text-white/70 focus:outline-none">
+                    {INCIDENT_TYPES.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="text-[10px] font-mono text-white/30 uppercase mb-1.5 block">Floor</label>
-                  <input
-                    type="number" min={1} max={20} value={simFloor}
+                  <input type="number" min={1} max={20} value={simFloor}
                     onChange={e => setSimFloor(Number(e.target.value))}
-                    className="w-full bg-[#0d1117] border border-white/10 rounded px-3 py-2 text-xs font-mono text-white/70 focus:outline-none"
-                  />
+                    className="w-full bg-[#0d1117] border border-white/10 rounded px-3 py-2 text-xs font-mono text-white/70 focus:outline-none" />
                 </div>
-                <Button
-                  variant="danger"
-                  className="w-full justify-center"
-                  onClick={handleSimulate}
-                  disabled={simulating}
-                >
+                <Button variant="danger" className="w-full justify-center" onClick={handleSimulate} disabled={simulating}>
                   {simulating ? '⟳ Triggering...' : '⚡ Trigger Incident'}
                 </Button>
                 {simMsg && (
@@ -193,12 +191,10 @@ export default function CommandDashboard() {
           <Card className="p-4">
             <SectionHeader title="Recent History" subtitle={`${resolved.length} resolved`} />
             {resolved.length === 0 ? (
-              <p className="text-[10px] font-mono text-white/25 text-center py-4">No history</p>
+              <p className="text-[10px] font-mono text-white/25 text-center py-4">No history yet</p>
             ) : (
               <div className="divide-y divide-white/[0.04]">
-                {resolved.slice(0, 8).map(inc => (
-                  <IncidentRow key={inc.id} incident={inc} />
-                ))}
+                {resolved.slice(0, 8).map(inc => <IncidentRow key={inc.id} incident={inc} />)}
               </div>
             )}
           </Card>

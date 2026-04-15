@@ -1,18 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { useRouter } from 'next/navigation'
 import { Navbar } from '@/components/Navbar'
-import { useIncidents } from '@/hooks'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { token, user } = useAuth()
   const router = useRouter()
-  const { incidents } = useIncidents({ status: 'active' })
-  const activeCount = incidents.filter(i =>
-    ['detecting','triaging','active','investigating'].includes(i.status)
-  ).length
 
   useEffect(() => {
     if (!token) router.replace('/')
@@ -26,7 +21,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen bg-[#080c10]">
-      <Navbar activeIncidents={activeCount} />
+      <Navbar />
       <main className="max-w-[1400px] mx-auto px-4 py-6">
         {children}
       </main>

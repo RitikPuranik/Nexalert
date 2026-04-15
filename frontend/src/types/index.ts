@@ -15,6 +15,8 @@ export interface UserProfile {
   zone_assignment: string | null
   is_on_duty: boolean
   language: string
+  phone?: string | null
+  push_token?: string | null
 }
 
 export type IncidentType =

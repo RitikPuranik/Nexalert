@@ -4,8 +4,9 @@ import type {
   TriageStatusResponse, IncidentType
 } from '@/types'
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+const BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '')
 
+// Safe fetch — never throws, always returns ApiResponse
 async function req<T>(
   path: string,
   options: RequestInit & { token?: string } = {}
@@ -17,8 +18,18 @@ async function req<T>(
   }
   if (token) headers['Authorization'] = `Bearer ${token}`
 
-  const res = await fetch(`${BASE}${path}`, { ...init, headers })
-  return res.json()
+  try {
+    const res = await fetch(`${BASE}${path}`, { ...init, headers })
+    const text = await res.text()
+    if (!text) return { success: false, error: `Empty response (${res.status})` }
+    try {
+      return JSON.parse(text)
+    } catch {
+      return { success: false, error: `Non-JSON response (${res.status}): ${text.slice(0, 80)}` }
+    }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Network error' }
+  }
 }
 
 // ─── Incidents ────────────────────────────────────────────────────────────────
@@ -26,7 +37,7 @@ export const incidents = {
   list: (token: string, params?: { status?: string; floor?: number }) => {
     const qs = new URLSearchParams()
     if (params?.status) qs.set('status', params.status)
-    if (params?.floor) qs.set('floor', String(params.floor))
+    if (params?.floor !== undefined) qs.set('floor', String(params.floor))
     return req<Incident[]>(`/api/incidents${qs.size ? '?' + qs : ''}`, { token })
   },
 
@@ -54,7 +65,7 @@ export const incidents = {
     }),
 }
 
-// ─── SOS ──────────────────────────────────────────────────────────────────────
+// ─── SOS (no auth needed) ─────────────────────────────────────────────────────
 export const sos = {
   submit: (body: {
     hotel_id: string; type: string; room: string; floor: number
@@ -64,10 +75,10 @@ export const sos = {
     req<SOSResponse>('/api/incidents/sos', { method: 'POST', body: JSON.stringify(body) }),
 
   poll: (incidentId: string, room: string, lang = 'en') =>
-    req<TriageStatusResponse>(`/api/incidents/sos?incident_id=${incidentId}&room=${room}&lang=${lang}`),
+    req<TriageStatusResponse>(`/api/incidents/sos?incident_id=${incidentId}&room=${encodeURIComponent(room)}&lang=${lang}`),
 }
 
-// ─── Heatmap ──────────────────────────────────────────────────────────────────
+// ─── Heatmap (no auth) ────────────────────────────────────────────────────────
 export const heatmap = {
   get: (hotelId: string, floor: number, incidentId: string) =>
     req<FloorHeatmapResult>(`/api/heatmap?hotel_id=${hotelId}&floor=${floor}&incident_id=${incidentId}`),
@@ -102,29 +113,35 @@ export const staff = {
 
 // ─── Dead Man's Switch ────────────────────────────────────────────────────────
 export const deadman = {
+  // No auth — called after SOS
   start: (body: { incident_id: string; hotel_id: string; room: string; floor: number; interval_seconds?: number }) =>
     req<{ session_token: string; interval_seconds: number; next_ping_due: string; message: string }>(
       '/api/deadman/start', { method: 'POST', body: JSON.stringify(body) }
     ),
 
+  // No auth — guest taps button
   ping: (sessionToken: string) =>
     req<{ ok: boolean; status: string; seconds_remaining: number; next_ping_due: string }>(
       '/api/deadman/ping', { method: 'POST', body: JSON.stringify({ session_token: sessionToken }) }
     ),
 
+  // No auth — guest polls status
   status: (token: string) =>
     req<{ status: string; seconds_remaining: number; missed_pings: number; escalated: boolean }>(
-      `/api/deadman/status?token=${token}`
+      `/api/deadman/status?token=${encodeURIComponent(token)}`
     ),
 
+  // Requires manager/staff auth — GET active sessions
   getActive: (authToken: string) =>
     req<DeadmanSession[]>('/api/deadman/active', { token: authToken }),
 
+  // Requires manager/staff auth — POST check
   check: (authToken: string) =>
     req<{ checked: number; escalated: number; escalated_rooms: string[] }>(
-      '/api/deadman/check', { method: 'POST', token: authToken }
+      '/api/deadman/check', { method: 'POST', token: authToken, body: JSON.stringify({}) }
     ),
 
+  // Requires manager/staff auth
   resolve: (sessionToken: string, authToken: string) =>
     req<{ resolved: boolean }>('/api/deadman/resolve', {
       method: 'POST', token: authToken,
@@ -153,19 +170,20 @@ export const reports = {
     req<unknown[]>('/api/reports/drills', { token }),
 }
 
-// ─── Sensors ──────────────────────────────────────────────────────────────────
+// ─── Sensors (uses x-sensor-secret header) ───────────────────────────────────
 export const sensors = {
   event: (body: {
     sensor_id: string; hotel_id: string; type: string
     value: number; threshold: number; floor: number; zone: string; room?: string
   }) =>
     req<{ incident_id: string; is_duplicate: boolean }>('/api/sensors/event', {
-      method: 'POST', body: JSON.stringify(body),
+      method: 'POST',
+      body: JSON.stringify(body),
       headers: { 'x-sensor-secret': process.env.NEXT_PUBLIC_SENSOR_SECRET || '' },
     }),
 }
 
-// ─── Responder Portal ─────────────────────────────────────────────────────────
+// ─── Responder Portal (no auth) ───────────────────────────────────────────────
 export const responder = {
   get: (incidentId: string) =>
     req<unknown>(`/api/responder/portal?incident_id=${incidentId}`),
@@ -179,7 +197,7 @@ export const guests = {
     }),
 
   getLocations: (token: string, floor?: number) => {
-    const qs = floor ? `?floor=${floor}` : ''
+    const qs = floor !== undefined ? `?floor=${floor}` : ''
     return req<unknown[]>(`/api/guests/locations${qs}`, { token })
   },
 }
