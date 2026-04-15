@@ -2,18 +2,51 @@
 
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { Card, SectionHeader, Button, EmptyState, ProgressBar } from '@/components/ui'
+import { Card, SectionHeader, EmptyState, ProgressBar } from '@/components/ui'
 import { cn, formatMs, timeAgo } from '@/lib/utils'
 import * as api from '@/lib/api'
 import type { IncidentReport } from '@/types'
 
+const MOCK_REPORTS: IncidentReport[] = [
+  {
+    id: 'rep-001', incident_id: 'demo-inc-003', hotel_id: 'hotel-001',
+    generated_at: new Date(Date.now() - 3200*1000).toISOString(),
+    generated_by: 'mgr-001',
+    executive_summary: 'A security alert was reported in the hotel lobby at 14:22 by the on-duty security officer. The individual was identified within 4 minutes as a registered guest who had misplaced their key card. The incident was resolved without any guest disruption. Response times were within acceptable parameters. No emergency services were required.',
+    timeline: [
+      { timestamp: new Date(Date.now() - 4200*1000).toISOString(), event: 'Security alert reported in lobby', actor: 'Security Officer' },
+      { timestamp: new Date(Date.now() - 4100*1000).toISOString(), event: 'AI triage complete — severity 3 (monitor)', actor: 'NexAlert AI' },
+      { timestamp: new Date(Date.now() - 4000*1000).toISOString(), event: 'Task accepted: Verify individual identity', actor: 'security' },
+      { timestamp: new Date(Date.now() - 3800*1000).toISOString(), event: 'Individual identified as registered guest', actor: 'security' },
+      { timestamp: new Date(Date.now() - 3200*1000).toISOString(), event: 'All-clear issued — incident resolved', actor: 'Duty Manager' },
+    ],
+    response_metrics: {
+      time_to_triage_ms: 45000,
+      time_to_first_staff_response_ms: 62000,
+      time_to_resolution_ms: 1000000,
+      tasks_total: 3, tasks_completed: 3,
+      tasks_completion_rate: 100,
+      avg_task_acceptance_ms: 55000,
+    },
+    notifications_summary: { total_guests_notified: 0, sent: 0, delivered: 0, confirmed_safe: 0, requested_help: 0, languages: [] },
+    tasks_summary: { total: 3, completed: 3, unaccepted: [] },
+    recommendations: [
+      'Install digital key card dispensers near lobby to reduce guest confusion and prevent similar incidents.',
+      'Brief front desk staff on rapid guest identity verification protocols to reduce response time below 3 minutes.',
+      'Consider installing visible QR-code based self-service support kiosks in high-traffic areas.',
+    ],
+    pdf_url: null,
+  },
+]
+
 export default function ReportsPage() {
-  const { token } = useAuth()
+  const { token, isDemoMode } = useAuth()
   const [reports, setReports] = useState<IncidentReport[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<IncidentReport | null>(null)
 
   useEffect(() => {
+    if (isDemoMode) { setReports(MOCK_REPORTS); setLoading(false); return }
     if (!token) return
     const fetch = async () => {
       const res = await api.reports.list(token)
@@ -21,7 +54,7 @@ export default function ReportsPage() {
       setLoading(false)
     }
     fetch()
-  }, [token])
+  }, [token, isDemoMode])
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -33,22 +66,15 @@ export default function ReportsPage() {
       {loading ? (
         <div className="text-xs font-mono text-white/25 animate-pulse text-center py-12">Loading...</div>
       ) : reports.length === 0 ? (
-        <Card className="p-8">
-          <EmptyState icon="◷" title="No reports yet" subtitle="Generate a report from a resolved incident's detail page" />
-        </Card>
+        <Card className="p-8"><EmptyState icon="◷" title="No reports yet" subtitle="Generate a report from a resolved incident's detail page" /></Card>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Report list */}
           <div className="space-y-2">
             {reports.map(r => (
               <button key={r.id} onClick={() => setSelected(r)}
                 className={cn('w-full text-left p-3 rounded-lg border transition-all duration-150',
-                  selected?.id === r.id
-                    ? 'bg-white/8 border-white/15'
-                    : 'bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.05]')}>
-                <p className="text-xs font-mono text-white/60 truncate">
-                  {r.incident_id.slice(0,16)}...
-                </p>
+                  selected?.id === r.id ? 'bg-white/8 border-white/15' : 'bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.05]')}>
+                <p className="text-xs font-mono text-white/60 truncate">Inc. {r.incident_id.slice(0, 16)}...</p>
                 <p className="text-[10px] font-mono text-white/30 mt-0.5">{timeAgo(r.generated_at)}</p>
                 <div className="flex items-center gap-2 mt-1.5">
                   <ProgressBar value={r.response_metrics.tasks_completion_rate} max={100} color="green" />
@@ -58,19 +84,14 @@ export default function ReportsPage() {
             ))}
           </div>
 
-          {/* Report detail */}
           <div className="lg:col-span-2">
             {selected ? (
               <Card className="p-5 space-y-5">
                 <SectionHeader title="Incident Report" subtitle={`Generated ${timeAgo(selected.generated_at)}`} />
-
-                {/* Executive summary */}
                 <div>
                   <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-2">Executive Summary</p>
                   <p className="text-sm text-white/70 leading-relaxed">{selected.executive_summary}</p>
                 </div>
-
-                {/* Metrics */}
                 <div>
                   <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-3">Response Metrics</p>
                   <div className="grid grid-cols-2 gap-3">
@@ -87,8 +108,6 @@ export default function ReportsPage() {
                     ))}
                   </div>
                 </div>
-
-                {/* Timeline */}
                 {selected.timeline.length > 0 && (
                   <div>
                     <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-3">Timeline</p>
@@ -103,9 +122,7 @@ export default function ReportsPage() {
                             <p className="text-xs text-white/60">{e.event}</p>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-[9px] font-mono text-white/25">{e.actor}</span>
-                              <span className="text-[9px] font-mono text-white/20">
-                                {new Date(e.timestamp).toLocaleTimeString()}
-                              </span>
+                              <span className="text-[9px] font-mono text-white/20">{new Date(e.timestamp).toLocaleTimeString()}</span>
                             </div>
                           </div>
                         </div>
@@ -113,8 +130,6 @@ export default function ReportsPage() {
                     </div>
                   </div>
                 )}
-
-                {/* Recommendations */}
                 {selected.recommendations.length > 0 && (
                   <div>
                     <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-3">AI Recommendations</p>
@@ -130,9 +145,7 @@ export default function ReportsPage() {
                 )}
               </Card>
             ) : (
-              <Card className="p-8">
-                <EmptyState icon="◷" title="Select a report" subtitle="Click a report to view details" />
-              </Card>
+              <Card className="p-8"><EmptyState icon="◷" title="Select a report" subtitle="Click a report on the left to view details" /></Card>
             )}
           </div>
         </div>
