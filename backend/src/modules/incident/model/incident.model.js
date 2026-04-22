@@ -47,6 +47,11 @@ const IncidentSchema = new Schema(
     // Denormalised counters (updated as tasks complete)
     tasks_total:     { type: Number, default: 0 },
     tasks_completed: { type: Number, default: 0 },
+
+    // ── AI Correlation fields ────────────────────────────────────────────
+    correlated_incidents: [{ type: Schema.Types.ObjectId, ref: "Incident" }],
+    correlation_reason:   String,
+    is_cascade:           { type: Boolean, default: false },
   },
   { timestamps: true }
 );

@@ -2,7 +2,9 @@
 const Incident = require("../../incident/model/incident.model");
 const { checkSessions }      = require("../../guest/service/deadman.service");
 const { checkStaffPresence } = require("../../staff/service/staff.service");
+const { checkEscalationPolicies } = require("../../incident/service/escalation.service");
 const { emitCrisisEvent }    = require("../../../lib/eventBus");
+const { sendToRole }         = require("../../../lib/fcm.service");
 
 /**
  * Main cron handler — called every 30 s by Vercel Cron or UptimeRobot.
@@ -35,6 +37,8 @@ async function runCronCheck() {
     deadman_sessions_escalated:   0,
     staff_presence_checked:       0,
     staff_silenced:               0,
+    escalation_policies_checked:  0,
+    escalations_triggered:        0,
     duration_ms:                  0,
   };
 
@@ -46,6 +50,15 @@ async function runCronCheck() {
       summary.deadman_sessions_checked   += dm.checked;
       summary.deadman_sessions_escalated += dm.escalated;
 
+      // FCM push to managers on deadman escalation
+      if (dm.escalated > 0) {
+        sendToRole(hotelId, "manager",
+          `⚠️ ${dm.escalated} Guest(s) Unresponsive`,
+          `Dead man's switch escalation: ${dm.escalated} guest(s) have stopped responding. Check war room immediately.`,
+          { escalated: String(dm.escalated) }, "high"
+        ).catch(console.error);
+      }
+
       // Staff presence check per incident
       let hotelPresenceChecked = 0;
       let hotelStaffSilenced   = 0;
@@ -56,6 +69,15 @@ async function runCronCheck() {
       }
       summary.staff_presence_checked += hotelPresenceChecked;
       summary.staff_silenced         += hotelStaffSilenced;
+
+      // SLA Escalation policy checks
+      try {
+        const esc = await checkEscalationPolicies(hotelId);
+        summary.escalation_policies_checked += esc.policies_checked;
+        summary.escalations_triggered       += esc.escalations_triggered;
+      } catch (escErr) {
+        console.error(`[Cron] Escalation check failed for hotel ${hotelId}:`, escErr.message);
+      }
 
       emitCrisisEvent(hotelId, "cron:check", {
         active_incidents:   incidents.length,

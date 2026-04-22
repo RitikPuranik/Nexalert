@@ -1,6 +1,7 @@
 "use strict";
 require("dotenv").config();
 
+const http    = require("http");
 const express = require("express");
 const cors    = require("cors");
 const { connectDB } = require("./config/db");
@@ -13,12 +14,18 @@ const guestRoutes    = require("./modules/guest/routes/guest.routes");
 const incidentRoutes = require("./modules/incident/routes/incident.routes");
 const reportRoutes   = require("./modules/report/routes/report.routes");
 const realtimeRoutes = require("./modules/realtime/routes/realtime.routes");
+const auditRoutes    = require("./modules/audit/routes/audit.routes");
+const simulateRoutes = require("./modules/simulate/routes/simulate.routes");
+
+// ── Socket.IO ────────────────────────────────────────────────────────────────
+const { initSocketIO } = require("./lib/socketManager");
 
 const app = express();
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
+const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : "*";
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : "*",
+  origin: allowedOrigins,
   methods: ["GET","POST","PATCH","PUT","DELETE","OPTIONS"],
   allowedHeaders: ["Content-Type","Authorization","x-sensor-secret","x-cron-secret"],
 }));
@@ -37,7 +44,7 @@ app.use(async (_req, res, next) => {
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", service: "NexAlert API", version: "2.0.0", time: new Date().toISOString() });
+  res.json({ status: "ok", service: "NexAlert API", version: "3.0.0", time: new Date().toISOString() });
 });
 
 // ── Module routes ─────────────────────────────────────────────────────────────
@@ -48,6 +55,9 @@ app.use("/api/guests",    guestRoutes);
 app.use("/api/incidents", incidentRoutes);
 app.use("/api/reports",   reportRoutes);
 app.use("/api/realtime",  realtimeRoutes);
+app.use("/api/audit",     auditRoutes);
+app.use("/api/simulate",  simulateRoutes);
+app.use("/api/system",    simulateRoutes);  // /api/system/health/deep shares the router
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ error: `Not found: ${req.method} ${req.path}` }));
@@ -67,9 +77,15 @@ async function start() {
 
     if (process.env.NODE_ENV !== "production") {
       const PORT = process.env.PORT || 3001;
-      app.listen(PORT, () => {
+
+      // Wrap Express with HTTP server for Socket.IO
+      const httpServer = http.createServer(app);
+      initSocketIO(httpServer, allowedOrigins);
+
+      httpServer.listen(PORT, () => {
         console.log(`[Server] NexAlert API on http://localhost:${PORT}`);
         console.log(`[Server] Health: http://localhost:${PORT}/api/health`);
+        console.log(`[Server] Socket.IO: ws://localhost:${PORT}`);
       });
     }
   } catch (err) {

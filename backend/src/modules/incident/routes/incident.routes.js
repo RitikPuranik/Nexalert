@@ -4,6 +4,7 @@ const rateLimit = require("express-rate-limit");
 const { requireAuth, requireRole } = require("../../../middleware/auth");
 const { asyncHandler } = require("../../../lib/asyncHandler");
 const svc = require("../service/incident.service");
+const { listPolicies, createPolicy, updatePolicy, deletePolicy } = require("../service/escalation.service");
 
 const router = express.Router();
 
@@ -250,6 +251,55 @@ router.patch(
       action, notes
     );
     res.json(task);
+  })
+);
+
+// ── Escalation Policies (SLA Engine) ─────────────────────────────────────────
+
+/** GET /api/incidents/policies  — list escalation policies */
+router.get(
+  "/policies",
+  requireAuth,
+  requireRole("manager"),
+  asyncHandler(async (req, res) => {
+    const policies = await listPolicies(req.user.profile.hotel_id);
+    res.json(policies);
+  })
+);
+
+/** POST /api/incidents/policies  — create escalation policy */
+router.post(
+  "/policies",
+  requireAuth,
+  requireRole("manager"),
+  asyncHandler(async (req, res) => {
+    const { trigger, threshold_seconds, actions } = req.body;
+    if (!trigger || !threshold_seconds || !actions?.length)
+      return res.status(400).json({ error: "trigger, threshold_seconds, and actions required" });
+    const policy = await createPolicy(req.user.profile.hotel_id, req.body);
+    res.status(201).json(policy);
+  })
+);
+
+/** PATCH /api/incidents/policies/:id  — update escalation policy */
+router.patch(
+  "/policies/:id",
+  requireAuth,
+  requireRole("manager"),
+  asyncHandler(async (req, res) => {
+    const policy = await updatePolicy(req.params.id, req.user.profile.hotel_id, req.body);
+    res.json(policy);
+  })
+);
+
+/** DELETE /api/incidents/policies/:id  — delete escalation policy */
+router.delete(
+  "/policies/:id",
+  requireAuth,
+  requireRole("manager"),
+  asyncHandler(async (req, res) => {
+    await deletePolicy(req.params.id, req.user.profile.hotel_id);
+    res.json({ ok: true });
   })
 );
 

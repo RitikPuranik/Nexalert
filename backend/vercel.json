@@ -1,6 +1,0 @@
-{
-  "version": 2,
-  "builds": [{ "src": "src/index.js", "use": "@vercel/node" }],
-  "routes": [{ "src": "/(.*)", "dest": "src/index.js" }],
-  "crons": [{ "path": "/api/realtime/cron/check", "schedule": "*/1 * * * *" }]
-}

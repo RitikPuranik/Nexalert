@@ -2,11 +2,19 @@
 const Hotel = require("../model/hotel.model");
 const ExitRoute = require("../model/exitRoute.model");
 const FloorPlan = require("../model/floorPlan.model");
+const { createDefaultPolicies } = require("../../incident/service/escalation.service");
 
 // ── Hotel CRUD ──────────────────────────────────────────────────────────────
 
 async function createHotel(data) {
-  return Hotel.create(data);
+  const hotel = await Hotel.create(data);
+
+  // Create default escalation policies for the new hotel
+  createDefaultPolicies(hotel._id).catch((err) =>
+    console.error("[Hotel] Failed to create default escalation policies:", err.message)
+  );
+
+  return hotel;
 }
 
 async function getHotelById(id) {
@@ -55,6 +63,24 @@ async function upsertFloorPlan(hotelId, floor, data) {
   ).lean();
 }
 
+// ── Geofences ─────────────────────────────────────────────────────────────────────
+
+async function addGeofence(hotelId, geofenceData) {
+  return Hotel.findByIdAndUpdate(
+    hotelId,
+    { $push: { geofences: geofenceData } },
+    { new: true }
+  ).lean();
+}
+
+async function removeGeofence(hotelId, geofenceId) {
+  return Hotel.findByIdAndUpdate(
+    hotelId,
+    { $pull: { geofences: { _id: geofenceId } } },
+    { new: true }
+  ).lean();
+}
+
 module.exports = {
   createHotel,
   getHotelById,
@@ -66,4 +92,6 @@ module.exports = {
   deleteExitRoute,
   getFloorPlan,
   upsertFloorPlan,
+  addGeofence,
+  removeGeofence,
 };

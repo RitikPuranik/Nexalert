@@ -11,15 +11,26 @@ const { emitCrisisEvent }    = require("../../../lib/eventBus");
 const { runTriagePipeline }  = require("./triage.service");
 const { generateToken }      = require("../../../lib/tokens");
 const { sendSMS }            = require("../../realtime/service/twilio.service");
+const { logAction }          = require("../../audit/service/audit.service");
+const { sendToHotelStaff, severityToPriority } = require("../../../lib/fcm.service");
 
 // ── Create incident (manual / staff) ────────────────────────────────────────
 
-async function createIncident(hotelId, { type, floor, zone, room, is_drill = false }) {
+async function createIncident(hotelId, { type, floor, zone, room, is_drill = false }, actorId = "system") {
   const incident = await Incident.create({
     hotel_id: hotelId, type, floor, zone, room,
     source: "staff", is_drill, status: "detecting",
   });
   emitCrisisEvent(hotelId, "incident:created", { incident_id: incident._id, type, floor, source: "staff", is_drill });
+
+  logAction({
+    actor: actorId, actorType: "staff", action: "incident:created",
+    resourceType: "incident", resourceId: incident._id,
+    hotelId, incidentId: incident._id,
+    after: { type, floor, zone, room, is_drill, status: "detecting" },
+    details: `${is_drill ? "[DRILL] " : ""}Incident created: ${type} on floor ${floor}`,
+  });
+
   runTriagePipeline(incident._id).catch(console.error);
   return incident;
 }
@@ -108,7 +119,7 @@ async function getSOSStatus(hotelId, floor) {
 
 // ── Manager actions ──────────────────────────────────────────────────────────
 
-async function applyManagerAction(incidentId, action) {
+async function applyManagerAction(incidentId, action, actorId = "manager") {
   const statusMap = {
     confirm:        "active",
     investigate:    "investigating",
@@ -121,6 +132,7 @@ async function applyManagerAction(incidentId, action) {
   const incident = await Incident.findById(incidentId);
   if (!incident) throw Object.assign(new Error("Incident not found"), { status: 404 });
 
+  const beforeStatus = incident.status;
   incident.status = statusMap[action];
 
   if (action === "confirm")    incident.confirmed_at = new Date();
@@ -133,16 +145,39 @@ async function applyManagerAction(incidentId, action) {
       { status: "expired" }
     );
     emitCrisisEvent(incident.hotel_id, "incident:resolved", { incident_id: incidentId });
+
+    // FCM: notify all staff incident is resolved
+    sendToHotelStaff(incident.hotel_id, "✅ Incident Resolved",
+      `${incident.type} incident on floor ${incident.floor} has been resolved. All clear.`,
+      { incident_id: String(incidentId), action: "resolved" }, "normal"
+    ).catch(console.error);
   }
 
   if (action === "escalate_911") {
     incident.escalated_to_911_at   = new Date();
     incident.responder_briefing_packet = await _build911Packet(incident);
     emitCrisisEvent(incident.hotel_id, "incident:updated", { incident_id: incidentId, action: "escalate_911" });
+
+    // FCM: critical alert to all staff
+    sendToHotelStaff(incident.hotel_id, "🚨 911 Escalated",
+      `Emergency services contacted for ${incident.type} on floor ${incident.floor}. Follow responder instructions.`,
+      { incident_id: String(incidentId), action: "escalate_911" }, "high"
+    ).catch(console.error);
   }
 
   await incident.save();
   emitCrisisEvent(incident.hotel_id, "incident:updated", { incident_id: incidentId, status: incident.status, action });
+
+  // Audit log
+  logAction({
+    actor: actorId, actorType: "manager", action: `manager:${action}`,
+    resourceType: "incident", resourceId: incidentId,
+    hotelId: incident.hotel_id, incidentId,
+    before: { status: beforeStatus },
+    after:  { status: incident.status, action },
+    details: `Manager action: ${action}`,
+  });
+
   return incident;
 }
 
@@ -155,6 +190,7 @@ async function applyTaskAction(incidentId, taskId, staffId, hotelId, action, not
   const task = await StaffTask.findById(taskId);
   if (!task) throw Object.assign(new Error("Task not found"), { status: 404 });
 
+  const beforeStatus = task.status;
   task.status = actionMap[action];
   if (notes)              task.notes        = notes;
   if (action === "accept") { task.accepted_at  = new Date(); task.assigned_to = staffId; }
@@ -181,6 +217,17 @@ async function applyTaskAction(incidentId, taskId, staffId, hotelId, action, not
   }
 
   emitCrisisEvent(hotelId, "task:updated", { incident_id: incidentId, task_id: taskId, status: task.status, staff_id: staffId });
+
+  // Audit log
+  logAction({
+    actor: staffId, actorType: "staff", action: `task:${action}`,
+    resourceType: "task", resourceId: taskId,
+    hotelId, incidentId,
+    before: { status: beforeStatus },
+    after:  { status: task.status, notes },
+    details: `Task "${task.title}": ${beforeStatus} → ${task.status}`,
+  });
+
   return task;
 }
 

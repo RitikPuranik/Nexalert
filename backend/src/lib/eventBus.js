@@ -53,9 +53,23 @@ class EventBus {
 
 const eventBus = new EventBus();
 
-/** Convenience wrapper used by every module. */
+/**
+ * Convenience wrapper used by every module.
+ * Dual-emits to both SSE clients and Socket.IO rooms.
+ * 
+ * Uses lazy require to avoid circular dependency with socketManager.
+ */
 function emitCrisisEvent(hotelId, type, payload = {}) {
+  // SSE emit (original)
   eventBus.emit(hotelId, type, payload);
+
+  // Socket.IO emit (lazy-loaded to avoid circular dependency)
+  try {
+    const { emitToHotelRoom } = require("./socketManager");
+    emitToHotelRoom(String(hotelId), type, payload);
+  } catch {
+    // Socket.IO not available — SSE will still work
+  }
 }
 
 module.exports = { eventBus, emitCrisisEvent };

@@ -4,6 +4,8 @@ const SensorEvent = require("../model/sensorEvent.model");
 const Incident    = require("../../incident/model/incident.model");
 const { emitCrisisEvent } = require("../../../lib/eventBus");
 const { runTriagePipeline } = require("../../incident/service/triage.service");
+const { correlateEvent, checkCascadeRule } = require("./correlator.service");
+const { logAction } = require("../../audit/service/audit.service");
 
 /** Sensor type → incident type mapping */
 const TYPE_MAP = {
@@ -41,7 +43,83 @@ async function processSensorEvent(sensorId, value, threshold) {
     return { status: "logged", triggered: false };
   }
 
-  // Above threshold — deduplicate against existing active incident on same floor/zone
+  // Above threshold — run AI correlation before creating new incident
+  const sensorContext = {
+    sensor_id: sensorId,
+    value,
+    threshold: effectiveThreshold,
+    type:      sensor.type,
+    floor:     sensor.floor,
+    zone:      sensor.zone,
+    hotel_id:  sensor.hotel_id,
+  };
+
+  let correlation;
+  try {
+    correlation = await correlateEvent(sensorContext);
+  } catch (corrErr) {
+    console.error("[Sensor] Correlation failed, treating as new:", corrErr.message);
+    correlation = { action: "new" };
+  }
+
+  // If correlated with existing incident, merge instead of creating new
+  if (correlation.action === "merge" && correlation.target_incident_id) {
+    await SensorEvent.findByIdAndUpdate(event._id, {
+      incident_id:        correlation.target_incident_id,
+      triggered_incident: false,
+    });
+
+    // Upgrade severity if recommended
+    if (correlation.upgrade_severity && correlation.suggested_severity) {
+      const targetInc = await Incident.findById(correlation.target_incident_id);
+      if (targetInc && (targetInc.severity || 3) > correlation.suggested_severity) {
+        const before = { severity: targetInc.severity };
+        targetInc.severity        = correlation.suggested_severity;
+        targetInc.severity_reason = `Upgraded via AI correlation: ${correlation.correlation_reason}`;
+        if (correlation.suggested_severity === 1) {
+          targetInc.recommend_911 = true;
+          targetInc.recommend_911_reason = "Severity auto-upgraded to CRITICAL by AI correlation engine.";
+        }
+        await targetInc.save();
+
+        emitCrisisEvent(sensor.hotel_id, "incident:updated", {
+          incident_id: correlation.target_incident_id,
+          severity:    correlation.suggested_severity,
+          action:      "correlation_upgrade",
+          reason:      correlation.correlation_reason,
+        });
+
+        logAction({
+          actor: `sensor:${sensorId}`, actorType: "sensor",
+          action: "incident:correlation_upgrade",
+          resourceType: "incident", resourceId: correlation.target_incident_id,
+          hotelId: sensor.hotel_id, incidentId: correlation.target_incident_id,
+          before, after: { severity: correlation.suggested_severity },
+          details: correlation.correlation_reason,
+        });
+      }
+    }
+
+    emitCrisisEvent(sensor.hotel_id, "sensor:correlated", {
+      sensor_id:   sensorId,
+      incident_id: correlation.target_incident_id,
+      value,
+      threshold:   effectiveThreshold,
+      correlation_reason: correlation.correlation_reason,
+    });
+
+    logAction({
+      actor: `sensor:${sensorId}`, actorType: "sensor",
+      action: "sensor:event_correlated",
+      resourceType: "sensor_event", resourceId: event._id,
+      hotelId: sensor.hotel_id, incidentId: correlation.target_incident_id,
+      details: `Correlated with existing incident: ${correlation.correlation_reason}`,
+    });
+
+    return { status: "correlated", incident_id: correlation.target_incident_id, correlation_reason: correlation.correlation_reason };
+  }
+
+  // Deduplicate against existing active incident on same floor/zone (original logic)
   const existing = await Incident.findOne({
     hotel_id: sensor.hotel_id,
     floor:    sensor.floor,
@@ -86,8 +164,20 @@ async function processSensorEvent(sensorId, value, threshold) {
     source:      "sensor",
   });
 
+  logAction({
+    actor: `sensor:${sensorId}`, actorType: "sensor",
+    action: "incident:created",
+    resourceType: "incident", resourceId: incident._id,
+    hotelId: sensor.hotel_id, incidentId: incident._id,
+    after: { type: incident.type, floor: incident.floor, source: "sensor" },
+    details: `Sensor ${sensorId} triggered new incident: ${incident.type} on floor ${incident.floor}`,
+  });
+
   // Fire triage asynchronously (non-blocking)
   runTriagePipeline(incident._id).catch(console.error);
+
+  // Check cascade rule after new incident creation
+  checkCascadeRule(sensor.hotel_id).catch(console.error);
 
   return { status: "incident_created", incident_id: incident._id };
 }

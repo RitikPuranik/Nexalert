@@ -25,6 +25,17 @@ const HotelSchema = new Schema(
     ],
     /** Per-hotel Twilio number override */
     twilio_from_number: String,
+
+    /** Geofence definitions for zone-based auto-actions */
+    geofences: [{
+      label:          { type: String, required: true },
+      type:           { type: String, enum: ["polygon", "circle"], required: true },
+      coordinates:    [[Number]],                            // for polygon: [[lat,lng], ...]
+      center:         { lat: Number, lng: Number },          // for circle
+      radius_meters:  Number,                                // for circle
+      floor:          Number,                                // optional: scope to a specific floor
+      auto_action:    { type: String, enum: ["mark_safe", "reroute_alert", "muster_arrival"], required: true },
+    }],
     timezone: { type: String, default: "UTC" },
   },
   { timestamps: true }

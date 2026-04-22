@@ -2,6 +2,8 @@
 const GuestLocation     = require("../model/guestLocation.model");
 const GuestNotification = require("../model/guestNotification.model");
 const { emitCrisisEvent } = require("../../../lib/eventBus");
+const { logAction } = require("../../audit/service/audit.service");
+const { checkGeofences } = require("./geofence.service");
 
 // ── Check-in / location ─────────────────────────────────────────────────────
 
@@ -35,6 +37,12 @@ async function updateCoordinates(hotelId, room, coordinates) {
   ).lean();
   if (!doc) throw Object.assign(new Error("Guest not found"), { status: 404 });
   emitCrisisEvent(hotelId, "heatmap:change", { room, floor: doc.floor, coordinates });
+
+  // Check geofences during active incidents (non-blocking)
+  checkGeofences(hotelId, room, doc.floor, coordinates).catch((err) =>
+    console.error("[Geofence] Check failed:", err.message)
+  );
+
   return doc;
 }
 
@@ -51,6 +59,15 @@ async function recordResponse(hotelId, room, floor, response, incidentId) {
     );
   }
   emitCrisisEvent(hotelId, "guest:response", { room, floor, response, incident_id: incidentId });
+
+  logAction({
+    actor: `guest:${room}`, actorType: "guest",
+    action: "guest:response",
+    resourceType: "guest_location", resourceId: `${hotelId}:${room}`,
+    hotelId, incidentId,
+    after: { response },
+    details: `Guest in room ${room}: ${response}`,
+  });
 }
 
 async function checkoutGuest(hotelId, room) {

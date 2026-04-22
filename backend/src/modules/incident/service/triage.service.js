@@ -10,6 +10,8 @@ const { runAITriage }   = require("./gemini.service");
 const { sendSMS }       = require("../../realtime/service/twilio.service");
 const { emitCrisisEvent } = require("../../../lib/eventBus");
 const { generateToken } = require("../../../lib/tokens");
+const { sendToHotelStaff, severityToPriority } = require("../../../lib/fcm.service");
+const { logAction } = require("../../audit/service/audit.service");
 
 // ── Fallback triage (used when Gemini fails) ─────────────────────────────────
 
@@ -168,6 +170,16 @@ async function runTriagePipeline(incidentId) {
       tasks_created:  insertedTasks.length,
       guests_alerted: notificationDocs.length,
     });
+
+    // FCM push to all on-duty staff after triage
+    const severityLabels = { 1: "🚨 CRITICAL", 2: "⚠️ URGENT", 3: "ℹ️ MONITOR" };
+    sendToHotelStaff(
+      incident.hotel_id,
+      `${severityLabels[triage.severity] || "⚠️"} ${incident.type.toUpperCase()} — Floor ${incident.floor}`,
+      triage.manager_briefing || `${incident.type} incident on floor ${incident.floor}. ${insertedTasks.length} tasks assigned.`,
+      { incident_id: String(incidentId), severity: String(triage.severity), floor: String(incident.floor) },
+      severityToPriority(triage.severity)
+    ).catch(console.error);
 
     // ── Step 7: Dispatch alerts + create deadman sessions (parallel) ────────
     const [insertedNotifications] = await Promise.all([

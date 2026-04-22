@@ -129,4 +129,42 @@ router.post(
   })
 );
 
+// ── Geofences ────────────────────────────────────────────────────────────────
+
+/** GET /api/hotels/geofences  — list geofences (any auth) */
+router.get(
+  "/geofences",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const hotel = await svc.getHotelById(req.user.profile.hotel_id);
+    if (!hotel) return res.status(404).json({ error: "Hotel not found" });
+    res.json(hotel.geofences || []);
+  })
+);
+
+/** POST /api/hotels/geofences  — add geofence (manager) */
+router.post(
+  "/geofences",
+  requireAuth,
+  requireRole("manager"),
+  asyncHandler(async (req, res) => {
+    const { label, type, auto_action } = req.body;
+    if (!label || !type || !auto_action)
+      return res.status(400).json({ error: "label, type, and auto_action required" });
+    const hotel = await svc.addGeofence(req.user.profile.hotel_id, req.body);
+    res.status(201).json(hotel.geofences);
+  })
+);
+
+/** DELETE /api/hotels/geofences/:id  — remove geofence (manager) */
+router.delete(
+  "/geofences/:id",
+  requireAuth,
+  requireRole("manager"),
+  asyncHandler(async (req, res) => {
+    const hotel = await svc.removeGeofence(req.user.profile.hotel_id, req.params.id);
+    res.json(hotel.geofences);
+  })
+);
+
 module.exports = router;
