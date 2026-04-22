@@ -29,7 +29,7 @@ app.use((req, _res, next) => {
   express.json({ limit: "2mb" })(req, _res, next);
 });
 
-// ── DB connection (lazy — re-used across serverless invocations) ──────────────
+// ── DB guard middleware (fallback for serverless — connection already open in dev) ──
 app.use(async (_req, res, next) => {
   try { await connectDB(); next(); }
   catch (err) { res.status(503).json({ error: "Database unavailable" }); }
@@ -59,10 +59,25 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ error: err.message || "Internal server error" });
 });
 
-// ── Local dev server ──────────────────────────────────────────────────────────
-if (process.env.NODE_ENV !== "production") {
-  const PORT = process.env.PORT || 3001;
-  app.listen(PORT, () => console.log(`[Server] NexAlert API on http://localhost:${PORT}`));
+// ── Start server ──────────────────────────────────────────────────────────────
+async function start() {
+  try {
+    // Connect to DB eagerly so you see the connection message on boot
+    await connectDB();
+
+    if (process.env.NODE_ENV !== "production") {
+      const PORT = process.env.PORT || 3001;
+      app.listen(PORT, () => {
+        console.log(`[Server] NexAlert API on http://localhost:${PORT}`);
+        console.log(`[Server] Health: http://localhost:${PORT}/api/health`);
+      });
+    }
+  } catch (err) {
+    console.error("[Server] Failed to start:", err.message);
+    process.exit(1);
+  }
 }
+
+start();
 
 module.exports = app;
