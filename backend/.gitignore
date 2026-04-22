@@ -1,4 +1,2 @@
-node_modules/
-.next/
 .env
-apiCalls.ts
+node_modules
