@@ -16,6 +16,7 @@ const reportRoutes   = require("./modules/report/routes/report.routes");
 const realtimeRoutes = require("./modules/realtime/routes/realtime.routes");
 const auditRoutes    = require("./modules/audit/routes/audit.routes");
 const simulateRoutes = require("./modules/simulate/routes/simulate.routes");
+const demoRoutes     = require("./modules/demo/routes/demo.routes");
 
 // ── Socket.IO ────────────────────────────────────────────────────────────────
 const { initSocketIO } = require("./lib/socketManager");
@@ -58,6 +59,7 @@ app.use("/api/realtime",  realtimeRoutes);
 app.use("/api/audit",     auditRoutes);
 app.use("/api/simulate",  simulateRoutes);
 app.use("/api/system",    simulateRoutes);  // /api/system/health/deep shares the router
+app.use("/api/demo",      demoRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ error: `Not found: ${req.method} ${req.path}` }));

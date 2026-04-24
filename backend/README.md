@@ -7,7 +7,7 @@ A fully modular Express.js + MongoDB backend. Monitors a hotel for crises, autom
 ## Tech Stack
 
 | Layer | Technology |
-|---|---|
+|---|---|`
 | Runtime | Node.js 18+ |
 | Framework | Express.js |
 | Database | MongoDB (Mongoose ODM) |

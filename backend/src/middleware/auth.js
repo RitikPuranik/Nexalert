@@ -10,6 +10,25 @@ async function requireAuth(req, res, next) {
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: "Missing auth token" });
 
+  // ── Demo bypass (non-production only) ──────────────────────────────────
+  if (process.env.NODE_ENV !== "production") {
+    const demoMap = {
+      DEMO_MANAGER_TOKEN: "DEMO_MANAGER_UID",
+      DEMO_STAFF_1_TOKEN: "DEMO_STAFF_1",
+      DEMO_STAFF_2_TOKEN: "DEMO_STAFF_2",
+      DEMO_STAFF_3_TOKEN: "DEMO_STAFF_3",
+    };
+    const demoUid = demoMap[token];
+    if (demoUid) {
+      const profile = await UserProfile.findOne({ firebase_uid: demoUid }).lean();
+      if (profile) {
+        req.user = { uid: demoUid, profile };
+        return next();
+      }
+      return res.status(403).json({ error: "Demo profile not found. Run POST /api/demo/seed first." });
+    }
+  }
+
   try {
     const decoded = await admin.auth().verifyIdToken(token);
     const profile = await UserProfile.findOne({ firebase_uid: decoded.uid }).lean();
