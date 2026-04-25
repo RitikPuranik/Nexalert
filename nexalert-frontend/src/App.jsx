@@ -9,17 +9,27 @@ import Staff from './pages/Staff';
 import Audit from './pages/Audit';
 import Health from './pages/Health';
 
+function Spinner() {
+  return (
+    <div className="min-h-screen bg-[#04080f] flex items-center justify-center">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-10 h-10 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+        <span className="text-slate-500 text-sm">Loading…</span>
+      </div>
+    </div>
+  );
+}
+
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="loading-page"><div className="loading-spinner" /><span>Loading…</span></div>;
+  if (loading) return <Spinner />;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }
 
 function AppRoutes() {
   const { user, loading } = useAuth();
-  if (loading) return <div className="loading-page"><div className="loading-spinner" /></div>;
-
+  if (loading) return <Spinner />;
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />

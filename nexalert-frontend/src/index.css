@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; color-scheme: dark; }
+  body { background-color: #04080f; color: #f1f5f9; min-height: 100vh; font-family: 'Space Grotesk', system-ui, sans-serif; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+}
+
+@layer utilities {
+  .bg-night-950 { background-color: #04080f; }
+  .bg-night-900 { background-color: #080d1a; }
+  .bg-night-800 { background-color: #0c1325; }
+  .bg-night-700 { background-color: #111b35; }
+  .hover-white-3:hover { background-color: rgba(255,255,255,0.03); }
+}
