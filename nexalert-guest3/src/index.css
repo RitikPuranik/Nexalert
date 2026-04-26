@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+  html {
+    font-family: 'Sora', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: #0d0d0d;
+    color: #f0f0f0;
+    height: 100%;
+  }
+  body { min-height: 100dvh; background: #0d0d0d; }
+  #root { min-height: 100dvh; }
+
+  /* Remove number input arrows */
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+  input[type=number] { -moz-appearance: textfield; }
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(1);    opacity: 0.6; }
+  100% { transform: scale(1.8);  opacity: 0; }
+}
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  20%     { transform: translateX(-6px); }
+  40%     { transform: translateX(6px); }
+  60%     { transform: translateX(-4px); }
+  80%     { transform: translateX(4px); }
+}
+@keyframes progress-fill {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+@keyframes countdown-drain {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: var(--circ); }
+}
+
+.anim-slide-up   { animation: slide-up 0.5s cubic-bezier(0.22,1,0.36,1) both; }
+.anim-fade-in    { animation: fade-in 0.4s ease both; }
+.anim-breathe    { animation: breathe 2.5s ease-in-out infinite; }
+.anim-shake      { animation: shake 0.4s ease; }
+
+.font-mono { font-family: 'IBM Plex Mono', monospace; }
+
+/* Glass card */
+.card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 20px;
+  backdrop-filter: blur(12px);
+}
+
+/* Danger card */
+.card-danger {
+  background: rgba(239,68,68,0.06);
+  border: 1px solid rgba(239,68,68,0.2);
+  border-radius: 20px;
+}
+
+/* Safe card */
+.card-safe {
+  background: rgba(34,197,94,0.06);
+  border: 1px solid rgba(34,197,94,0.2);
+  border-radius: 20px;
+}
+
+/* Input */
+.input {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 14px;
+  color: #f0f0f0;
+  font-family: 'Sora', sans-serif;
+  font-size: 1rem;
+  padding: 14px 16px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.input:focus { border-color: rgba(239,68,68,0.5); }
+.input::placeholder { color: rgba(255,255,255,0.2); }
+
+/* SOS button */
+.sos-btn {
+  width: 200px; height: 200px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 8px;
+  font-family: 'Sora', sans-serif;
+  font-weight: 800;
+  font-size: 1.4rem;
+  letter-spacing: 0.1em;
+  color: #fff;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.15s;
+  background: radial-gradient(circle at 35% 35%, #ef4444, #991b1b);
+  box-shadow: 0 0 40px rgba(239,68,68,0.3), 0 8px 32px rgba(0,0,0,0.5);
+}
+.sos-btn:active { transform: scale(0.93); }
+.sos-btn.held {
+  background: radial-gradient(circle at 35% 35%, #f87171, #ef4444);
+  box-shadow: 0 0 80px rgba(239,68,68,0.6), 0 8px 40px rgba(0,0,0,0.5);
+  transform: scale(0.95);
+}
+
+/* Pulse rings behind SOS */
+.pulse-ring {
+  position: absolute; inset: -20px;
+  border-radius: 50%;
+  background: transparent;
+  border: 2px solid rgba(239,68,68,0.4);
+  animation: pulse-ring 1.8s cubic-bezier(0.2,0.8,0.4,1) infinite;
+  pointer-events: none;
+}
+.pulse-ring:nth-child(2) { inset: -40px; animation-delay: 0.6s; }
+.pulse-ring:nth-child(3) { inset: -60px; animation-delay: 1.2s; }

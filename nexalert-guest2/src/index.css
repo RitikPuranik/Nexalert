@@ -1,8 +1,0 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-@layer base {
-  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-  body{margin:0;background:#080808;min-height:100dvh;color:#fff}
-}
