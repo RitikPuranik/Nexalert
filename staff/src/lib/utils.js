@@ -42,8 +42,17 @@ export function eventCategory(type='') {
   return 'system';
 }
 
-// QR URL builder for guests
-export function buildGuestQR(hotelId, room, floor) {
+// QR URL builder for guests — uses qr_token when available (more secure)
+export function buildGuestQR(hotelId, room, floor, qrToken) {
   const base = window.location.origin.replace('5173','5174');
+  if (qrToken) {
+    return `${base}/?t=${qrToken}&room=${room}&floor=${floor}`;
+  }
   return `${base}/?hotel_id=${hotelId}&room=${room}&floor=${floor}`;
+}
+
+// Build hotel-level QR (no room/floor — guest fills those in)
+export function buildHotelQR(qrToken, baseUrl) {
+  const base = baseUrl || window.location.origin.replace('5173','5174');
+  return `${base}/?t=${qrToken}`;
 }

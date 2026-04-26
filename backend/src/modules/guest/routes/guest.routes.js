@@ -1,4 +1,5 @@
 "use strict";
+const Hotel = require("../../hotel/model/hotel.model");
 const express   = require("express");
 const rateLimit = require("express-rate-limit");
 const { requireAuth, requireRole } = require("../../../middleware/auth");
@@ -21,11 +22,24 @@ router.post(
   "/locations",
   guestRateLimit,
   asyncHandler(async (req, res) => {
-    const { hotel_id, room, floor } = req.body;
-    if (!hotel_id || !room || !floor)
-      return res.status(400).json({ error: "hotel_id, room, floor required" });
-    const doc = await guestSvc.upsertLocation(req.body);
-    res.status(201).json(doc);
+    let { hotel_id, qr_token, room, floor } = req.body;
+    if (!room || !floor)
+      return res.status(400).json({ error: "room and floor required" });
+
+    // Support check-in via QR token (resolves hotel_id automatically)
+    if (!hotel_id && qr_token) {
+      const hotel = await Hotel.findOne({ qr_token }).lean();
+      if (!hotel) return res.status(404).json({ error: "Invalid QR code" });
+      hotel_id = String(hotel._id);
+    }
+    if (!hotel_id) return res.status(400).json({ error: "hotel_id or qr_token required" });
+
+    // Validate hotel exists
+    const hotel = await Hotel.findById(hotel_id).lean();
+    if (!hotel) return res.status(404).json({ error: "Hotel not found. Please scan the correct QR code." });
+
+    const doc = await guestSvc.upsertLocation({ ...req.body, hotel_id });
+    res.status(201).json({ ...doc, hotel_name: hotel.name });
   })
 );
 

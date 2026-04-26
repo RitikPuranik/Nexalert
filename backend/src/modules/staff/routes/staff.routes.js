@@ -129,4 +129,23 @@ router.get(
   })
 );
 
+
+/** PATCH /api/staff/:id/duty  — manager toggles duty for any team member */
+router.patch(
+  "/:id/duty",
+  requireAuth,
+  requireRole("manager"),
+  asyncHandler(async (req, res) => {
+    const { is_on_duty } = req.body;
+    if (typeof is_on_duty !== "boolean")
+      return res.status(400).json({ error: "is_on_duty (boolean) required" });
+    // Verify staff belongs to same hotel
+    const UserProfile = require("../model/userProfile.model");
+    const target = await UserProfile.findOne({ _id: req.params.id, hotel_id: req.user.profile.hotel_id }).lean();
+    if (!target) return res.status(404).json({ error: "Staff not found" });
+    const profile = await svc.setDutyStatus(req.params.id, is_on_duty);
+    res.json({ ok: true, is_on_duty: profile.is_on_duty });
+  })
+);
+
 module.exports = router;

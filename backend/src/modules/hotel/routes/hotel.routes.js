@@ -168,3 +168,38 @@ router.delete(
 );
 
 module.exports = router;
+
+// ── QR Token ──────────────────────────────────────────────────────────────────
+
+/** POST /api/hotels/qr-token  — generate a new unique QR token (manager) */
+router.post(
+  "/qr-token",
+  requireAuth,
+  requireRole("manager"),
+  asyncHandler(async (req, res) => {
+    const result = await svc.generateQrToken(req.user.profile.hotel_id);
+    res.json(result);
+  })
+);
+
+/** GET /api/hotels/qr-token  — get current QR token (manager/staff) */
+router.get(
+  "/qr-token",
+  requireAuth,
+  requireRole(["manager","staff"]),
+  asyncHandler(async (req, res) => {
+    const hotel = await svc.getHotelById(req.user.profile.hotel_id);
+    if (!hotel) return res.status(404).json({ error: "Hotel not found" });
+    res.json({ qr_token: hotel.qr_token || null, hotel_id: hotel._id });
+  })
+);
+
+/** GET /api/hotels/resolve-qr/:token  — resolve QR token → hotel info (public, guest use) */
+router.get(
+  "/resolve-qr/:token",
+  asyncHandler(async (req, res) => {
+    const hotel = await svc.getHotelByQrToken(req.params.token);
+    if (!hotel) return res.status(404).json({ error: "Invalid or expired QR code" });
+    res.json({ hotel_id: hotel._id, name: hotel.name, total_floors: hotel.total_floors });
+  })
+);

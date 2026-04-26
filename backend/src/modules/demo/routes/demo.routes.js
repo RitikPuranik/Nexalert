@@ -7,6 +7,8 @@ const UserProfile   = require("../../staff/model/userProfile.model");
 const GuestLocation = require("../../guest/model/guestLocation.model");
 const Sensor        = require("../../sensor/model/sensor.model");
 const { createDefaultPolicies } = require("../../incident/service/escalation.service");
+const Room = require("../../hotel/model/room.model");
+const crypto = require("crypto");
 
 const router = express.Router();
 
@@ -179,12 +181,37 @@ router.post(
       );
     }
 
+    // ── QR Token ─────────────────────────────────────────────────────────────
+    if (!hotel.qr_token) {
+      await Hotel.findByIdAndUpdate(hotelId, { qr_token: crypto.randomBytes(16).toString("hex") });
+    }
+    const freshHotel = await Hotel.findById(hotelId).lean();
+
+    // ── Rooms ─────────────────────────────────────────────────────────────────
+    const roomCount = await Room.countDocuments({ hotel_id: hotelId });
+    if (roomCount === 0) {
+      const demoRooms = [];
+      for (let floor = 1; floor <= 5; floor++) {
+        for (let r = 1; r <= 8; r++) {
+          demoRooms.push({
+            hotel_id: hotelId,
+            room_number: String(floor * 100 + r),
+            floor,
+            type: r <= 2 ? "suite" : r <= 5 ? "double" : "single",
+            status: "available",
+          });
+        }
+      }
+      await Room.insertMany(demoRooms, { ordered: false });
+    }
+
     res.json({
       ok: true,
       message: "Demo data seeded successfully",
       data: {
         hotel_id:    String(hotelId),
         hotel_name:  hotel.name,
+        qr_token:    freshHotel.qr_token,
         manager: {
           id:          String(manager._id),
           name:        manager.name,

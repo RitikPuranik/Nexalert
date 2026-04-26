@@ -4,9 +4,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 function getParams() {
   const p = new URLSearchParams(window.location.search);
   return {
-    hotel_id: p.get('hotel_id') || p.get('h') || '',
-    room:     p.get('room')     || p.get('r') || '',
-    floor:    p.get('floor')    || p.get('f') || '',
+    hotel_id:  p.get('hotel_id') || p.get('h') || '',
+    qr_token:  p.get('t') || '',
+    room:      p.get('room')     || p.get('r') || '',
+    floor:     p.get('floor')    || p.get('f') || '',
   };
 }
 
@@ -50,10 +51,12 @@ function Spin() {
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const params = getParams();
-  const hasParams = !!(params.hotel_id && params.room && params.floor);
+  const hasParams = !!((params.hotel_id || params.qr_token) && params.room && params.floor);
 
   const [screen,      setScreen]      = useState(hasParams ? S.IDLE : S.SETUP);
   const [hotelId,     setHotelId]     = useState(params.hotel_id);
+  const [qrToken,     setQrToken]     = useState(params.qr_token);
+  const [hotelName,   setHotelName]   = useState('');
   const [room,        setRoom]        = useState(params.room);
   const [floor,       setFloor]       = useState(params.floor);
   const [guestName,   setGuestName]   = useState('');
@@ -82,13 +85,20 @@ export default function App() {
 
   async function checkIn() {
     try {
-      await gPost('/api/guests/locations', {
-        hotel_id: hotelId, room, floor: parseInt(floor),
+      const data = await gPost('/api/guests/locations', {
+        hotel_id: hotelId || undefined,
+        qr_token: qrToken || undefined,
+        room, floor: parseInt(floor),
         name: guestName || undefined,
       });
+      if (data.hotel_id) setHotelId(data.hotel_id);
+      if (data.hotel_name) setHotelName(data.hotel_name);
       setCheckedIn(true);
       startGeo();
-    } catch { /* silent - might already be checked in */ }
+    } catch(err) {
+      setError(err.message);
+      setScreen(S.SETUP);
+    }
   }
 
   // ── Geolocation ──────────────────────────────────────────────────────────
@@ -174,13 +184,17 @@ export default function App() {
   // ── Setup submit ─────────────────────────────────────────────────────────
   async function handleSetup(e) {
     e.preventDefault();
-    if (!hotelId || !room || !floor) { setError('All fields required'); return; }
+    if ((!hotelId && !qrToken) || !room || !floor) { setError('All fields required'); return; }
     setLoading(true); setError('');
     try {
-      await gPost('/api/guests/locations', {
-        hotel_id: hotelId, room, floor: parseInt(floor),
+      const data = await gPost('/api/guests/locations', {
+        hotel_id: hotelId || undefined,
+        qr_token: qrToken || undefined,
+        room, floor: parseInt(floor),
         name: guestName || undefined,
       });
+      if (data.hotel_id) setHotelId(data.hotel_id);
+      if (data.hotel_name) setHotelName(data.hotel_name);
       setCheckedIn(true);
       startGeo();
       setScreen(S.IDLE);
@@ -237,6 +251,7 @@ export default function App() {
         {screen === S.SETUP && (
           <SetupScreen
             hotelId={hotelId} setHotelId={setHotelId}
+            qrToken={qrToken}
             room={room} setRoom={setRoom}
             floor={floor} setFloor={setFloor}
             guestName={guestName} setGuestName={setGuestName}
@@ -248,6 +263,7 @@ export default function App() {
         {screen === S.IDLE && (
           <IdleScreen
             room={room} floor={floor} guestName={guestName} checkedIn={checkedIn}
+            hotelName={hotelName}
             onSOS={() => setScreen(S.CONFIRM)}
           />
         )}
@@ -289,7 +305,7 @@ export default function App() {
 
 // ─── Screen Components ────────────────────────────────────────────────────────
 
-function SetupScreen({ hotelId, setHotelId, room, setRoom, floor, setFloor, guestName, setGuestName, loading, error, onSubmit }) {
+function SetupScreen({ hotelId, setHotelId, qrToken, room, setRoom, floor, setFloor, guestName, setGuestName, loading, error, onSubmit }) {
   return (
     <>
       <div className="text-center pt-2 pb-2">
@@ -301,12 +317,23 @@ function SetupScreen({ hotelId, setHotelId, room, setRoom, floor, setFloor, gues
       <div className="bg-[#111] border border-white/8 rounded-3xl p-6">
         <h2 className="font-bold text-white text-base mb-5">Check in to your room</h2>
         <form onSubmit={onSubmit} className="space-y-4">
+          {!qrToken && (
           <div>
             <label className="block text-[10px] font-bold text-[#555] uppercase tracking-widest mb-1.5">Hotel ID *</label>
-            <input required value={hotelId} onChange={e => setHotelId(e.target.value)}
+            <input required={!qrToken} value={hotelId} onChange={e => setHotelId(e.target.value)}
               className="w-full bg-black/60 border border-white/8 focus:border-red-500/40 focus:outline-none text-white placeholder-[#333] rounded-2xl px-4 py-3 text-sm"
               placeholder="Provided at front desk"/>
           </div>
+          )}
+          {qrToken && (
+          <div className="bg-emerald-500/8 border border-emerald-500/20 rounded-2xl px-4 py-3 flex items-center gap-2">
+            <span className="text-emerald-400 text-lg">✅</span>
+            <div>
+              <p className="text-emerald-400 text-xs font-bold">Hotel Verified via QR Code</p>
+              <p className="text-emerald-400/60 text-[10px]">Your hotel has been automatically identified</p>
+            </div>
+          </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[10px] font-bold text-[#555] uppercase tracking-widest mb-1.5">Room *</label>
@@ -339,7 +366,7 @@ function SetupScreen({ hotelId, setHotelId, room, setRoom, floor, setFloor, gues
   );
 }
 
-function IdleScreen({ room, floor, guestName, checkedIn, onSOS }) {
+function IdleScreen({ room, floor, guestName, checkedIn, hotelName, onSOS }) {
   const [held, setHeld] = useState(false);
   const timerRef = useRef(null);
   const [holdPct, setHoldPct] = useState(0);
@@ -378,7 +405,7 @@ function IdleScreen({ room, floor, guestName, checkedIn, onSOS }) {
             {checkedIn ? 'Emergency System Active' : 'Not Checked In'}
           </p>
           <p className={`text-xs ${checkedIn ? 'text-emerald-400/60' : 'text-[#444]'}`}>
-            {guestName ? `${guestName} · ` : ''}Room {room} · Floor {floor}
+            {hotelName ? `${hotelName} · ` : ''}{guestName ? `${guestName} · ` : ''}Room {room} · Floor {floor}
           </p>
         </div>
       </div>

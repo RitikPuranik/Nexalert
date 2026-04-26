@@ -94,4 +94,26 @@ module.exports = {
   upsertFloorPlan,
   addGeofence,
   removeGeofence,
+  generateQrToken,
+  getHotelByQrToken,
 };
+
+// ── QR Token ─────────────────────────────────────────────────────────────────
+const crypto = require("crypto");
+
+async function generateQrToken(hotelId) {
+  const token = crypto.randomBytes(16).toString("hex");
+  const hotel = await Hotel.findByIdAndUpdate(
+    hotelId,
+    { qr_token: token },
+    { new: true }
+  ).lean();
+  if (!hotel) throw Object.assign(new Error("Hotel not found"), { status: 404 });
+  return { qr_token: token };
+}
+
+async function getHotelByQrToken(token) {
+  return Hotel.findOne({ qr_token: token }).lean();
+}
+
+

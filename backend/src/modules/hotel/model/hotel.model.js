@@ -37,6 +37,8 @@ const HotelSchema = new Schema(
       auto_action:    { type: String, enum: ["mark_safe", "reroute_alert", "muster_arrival"], required: true },
     }],
     timezone: { type: String, default: "UTC" },
+    /** Unique QR token — used in guest check-in links */
+    qr_token: { type: String, unique: true, sparse: true, index: true },
   },
   { timestamps: true }
 );
