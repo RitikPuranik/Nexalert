@@ -82,6 +82,23 @@ async function buildWarRoom(incidentId, hotelId) {
     },
     tasks,
     notifications,
+    // guests: raw GuestLocation docs for the affected floor (used by WarRoom.jsx guest grid)
+    guests: allGuests.filter((g) => g.floor === affectedFloor).map((g) => {
+      const notif = notifications.find((n) => String(n.room) === String(g.room));
+      return {
+        _id:      g._id,
+        room:     g.room,
+        floor:    g.floor,
+        name:     g.name,
+        phone:    g.phone,
+        needs_accessibility: g.needs_accessibility,
+        coordinates: g.coordinates,
+        response: notif?.guest_response || "no_response",
+        responded_at: notif?.responded_at || null,
+        delivery_status: notif?.delivery_status || "not_notified",
+        notification_id: notif?._id || null,
+      };
+    }),
     floor_plan:    floorPlan,
     generated_at:  new Date().toISOString(),
   };

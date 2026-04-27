@@ -4,9 +4,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 function getParams() {
   const p = new URLSearchParams(window.location.search);
   return {
-    hotel_id: p.get('h') || p.get('hotel_id') || '',
-    room:     p.get('r') || p.get('room')     || '',
-    floor:    p.get('f') || p.get('floor')    || '',
+    hotel_id:  p.get('h') || p.get('hotel_id') || '',
+    qr_token:  p.get('t') || '',
+    room:      p.get('r') || p.get('room')     || '',
+    floor:     p.get('f') || p.get('floor')    || '',
   };
 }
 
@@ -51,10 +52,13 @@ const SCR = {
 
 /* ─── Root ────────────────────────────────────────────────────────────────── */
 export default function App() {
-  const { hotel_id, room: qrRoom, floor: qrFloor } = getParams();
+  const { hotel_id: paramHotelId, qr_token, room: qrRoom, floor: qrFloor } = getParams();
 
-  const [screen,     setScreen]     = useState(
-    !hotel_id ? SCR.ERR : (qrRoom && qrFloor) ? SCR.IDLE : SCR.ENTER
+  const [hotel_id,   setHotelId]   = useState(paramHotelId);
+  const [resolving,  setResolving] = useState(!!qr_token && !paramHotelId);
+  const [screen,     setScreen]    = useState(
+    (!paramHotelId && !qr_token) ? SCR.ERR :
+    (qrRoom && qrFloor)          ? SCR.IDLE : SCR.ENTER
   );
   const [room,       setRoom]       = useState(qrRoom);
   const [floor,      setFloor]      = useState(qrFloor);
@@ -75,12 +79,27 @@ export default function App() {
   const [sosLoad,    setSosLoad]     = useState(false);
   const [sosErr,     setSosErr]      = useState('');
 
+  /* ── Resolve QR token → hotel_id (runs once on mount if ?t= is present) ── */
+  useEffect(() => {
+    if (!qr_token || paramHotelId) return;
+    get(`/api/hotels/resolve-qr/${qr_token}`)
+      .then(data => {
+        setHotelId(data.hotel_id);
+        setResolving(false);
+        setScreen((qrRoom && qrFloor) ? SCR.IDLE : SCR.ENTER);
+      })
+      .catch(() => {
+        setResolving(false);
+        setScreen(SCR.ERR);
+      });
+  }, []);
+
   const geoRef    = useRef(null);
   const dmCntRef  = useRef(null);
   const dmPingRef = useRef(null);
   const pollRef   = useRef(null);
 
-  /* ── Silent check-in when QR has room ─────────────────────────────────── */
+  /* ── Silent check-in when QR has room (runs after token resolved) ──────── */
   useEffect(() => {
     if (hotel_id && qrRoom && qrFloor) {
       post('/api/guests/locations', {
@@ -88,7 +107,7 @@ export default function App() {
       }).catch(() => {});
       startGeo(qrRoom);
     }
-  }, []);
+  }, [hotel_id]);
 
   /* ── Geolocation ───────────────────────────────────────────────────────── */
   const startGeo = useCallback((r) => {
@@ -189,8 +208,21 @@ export default function App() {
       });
       setIncidentId(d.incident_id);
       setIncStatus(d.status);
-      if (d.deadman_token)    startDMS(d.deadman_token, d.deadman_interval || 120);
-      if (d.exit_instruction) setEvacMsg(d.exit_instruction);
+      if (d.deadman_token) startDMS(d.deadman_token, d.deadman_interval || 120);
+
+      // Use exit instruction from SOS response, or fetch from exit-routes API, or use fallback
+      let exitMsg = d.exit_instruction;
+      if (!exitMsg) {
+        try {
+          const routes = await get(`/api/guests/exit-routes?hotel_id=${hotel_id}&floor=${parseInt(floor)}`);
+          if (routes && routes.length > 0) {
+            exitMsg = `Please evacuate via ${routes[0].label}${routes[0].muster_point ? ` to ${routes[0].muster_point}` : ''}.`;
+          }
+        } catch { /* ignore */ }
+      }
+      // Always show SOME evacuation instruction
+      setEvacMsg(exitMsg || `Use the nearest stairwell — do NOT use elevators. Proceed to the emergency assembly point.`);
+
       startPoll(hotel_id, floor);
       setScreen(SCR.ACTIVE);
     } catch (err) { setSosErr(err.message); setScreen(SCR.IDLE); }
@@ -219,15 +251,41 @@ export default function App() {
     } catch { /* silent */ }
   }
 
+  /* ── Cancel SOS (false alarm) ─────────────────────────────────────────── */
+  async function cancelSOS() {
+    stopDMS();
+    clearInterval(pollRef.current);
+    stopGeo();
+    // Notify backend that guest is safe (best-effort, don't block UI)
+    try {
+      await patch('/api/guests/locations/respond', {
+        hotel_id, room, floor: parseInt(floor),
+        response: 'safe', incident_id: incidentId,
+      });
+    } catch { /* silent — staff will see no response */ }
+    setResponse(null);
+    setIncidentId(null);
+    setIncStatus(null);
+    setEvacMsg('');
+    setScreen(SCR.IDLE);
+  }
+
   /* ─── render ─────────────────────────────────────────────────────────── */
   const commonProps = { room, floor, hotel_id };
 
+  if (resolving) return (
+    <div className="min-h-dvh flex flex-col items-center justify-center" style={{background:'#0d0d0d'}}>
+      <div style={{width:'36px',height:'36px',borderRadius:'50%',border:'3px solid rgba(255,255,255,0.08)',borderTop:'3px solid rgba(255,255,255,0.5)',animation:'spin 0.8s linear infinite'}}/>
+      <p style={{color:'rgba(255,255,255,0.3)',fontSize:'0.8rem',marginTop:'16px',fontFamily:'IBM Plex Mono',letterSpacing:'0.08em'}}>Verifying hotel…</p>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
   if (screen === SCR.ERR)    return <ErrScreen/>;
   if (screen === SCR.ENTER)  return <EnterScreen roomInput={roomInput} setRoomInput={setRoomInput} floorInput={floorInput} setFloorInput={setFloorInput} error={entryErr} loading={entryLoad} onSubmit={handleEntry}/>;
   if (screen === SCR.IDLE)   return <IdleScreen {...commonProps} onSOS={() => setScreen(SCR.HOLD)}/>;
   if (screen === SCR.HOLD)   return <HoldScreen loading={sosLoad} error={sosErr} onConfirm={sendSOS} onCancel={() => setScreen(SCR.IDLE)}/>;
-  if (screen === SCR.ACTIVE) return <ActiveScreen {...commonProps} evacMsg={evacMsg} guestAlert={guestAlert} incStatus={incStatus} dmToken={dmToken} dmLeft={dmLeft} dmInterval={dmInterval} dmMissed={dmMissed} onSafe={() => respond('safe')} onHelp={() => respond('needs_help')} onPing={manualPing}/>;
-  if (screen === SCR.DONE)   return <DoneScreen {...commonProps} response={response} incStatus={incStatus} dmToken={dmToken} dmLeft={dmLeft} dmInterval={dmInterval} dmMissed={dmMissed} onPing={manualPing} onChangeResponse={changeResponse}/>;
+  if (screen === SCR.ACTIVE) return <ActiveScreen {...commonProps} evacMsg={evacMsg} guestAlert={guestAlert} incStatus={incStatus} dmToken={dmToken} dmLeft={dmLeft} dmInterval={dmInterval} dmMissed={dmMissed} onSafe={() => respond('safe')} onHelp={() => respond('needs_help')} onPing={manualPing} onCancel={cancelSOS}/>;
+  if (screen === SCR.DONE)   return <DoneScreen {...commonProps} evacMsg={evacMsg} response={response} incStatus={incStatus} dmToken={dmToken} dmLeft={dmLeft} dmInterval={dmInterval} dmMissed={dmMissed} onPing={manualPing} onChangeResponse={changeResponse}/>;
   if (screen === SCR.CLEAR)  return <ClearScreen onReset={() => { setResponse(null); setIncidentId(null); setIncStatus(null); setScreen(SCR.IDLE); }}/>;
   return null;
 }
@@ -466,7 +524,8 @@ function HoldScreen({ loading, error, onConfirm, onCancel }) {
 }
 
 /* ─── Active SOS ─────────────────────────────────────────────────────────── */
-function ActiveScreen({ room, floor, evacMsg, guestAlert, incStatus, dmToken, dmLeft, dmInterval, dmMissed, onSafe, onHelp, onPing }) {
+function ActiveScreen({ room, floor, evacMsg, guestAlert, incStatus, dmToken, dmLeft, dmInterval, dmMissed, onSafe, onHelp, onPing, onCancel }) {
+  const [showCancel, setShowCancel] = useState(false);
   return (
     <div className="min-h-dvh flex flex-col" style={{background:'#0d0d0d',padding:'0 20px 48px'}}>
       <div style={{background:'#ef4444',height:'4px',margin:'0 -20px'}}/>
@@ -536,13 +595,39 @@ function ActiveScreen({ room, floor, evacMsg, guestAlert, incStatus, dmToken, dm
             </div>
           ))}
         </div>
+
+        {/* False alarm / cancel */}
+        <div className="anim-slide-up" style={{animationDelay:'0.28s'}}>
+          {!showCancel ? (
+            <button onClick={() => setShowCancel(true)}
+              style={{width:'100%',background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:'14px',padding:'12px',color:'rgba(255,255,255,0.25)',fontSize:'0.78rem',fontFamily:'IBM Plex Mono',cursor:'pointer',letterSpacing:'0.05em',transition:'all 0.2s'}}>
+              This was a false alarm
+            </button>
+          ) : (
+            <div style={{background:'rgba(239,68,68,0.06)',border:'1px solid rgba(239,68,68,0.2)',borderRadius:'16px',padding:'16px',textAlign:'center'}}>
+              <p style={{color:'rgba(255,255,255,0.7)',fontSize:'0.88rem',fontWeight:600,marginBottom:'6px'}}>Cancel emergency alert?</p>
+              <p style={{color:'rgba(255,255,255,0.3)',fontSize:'0.75rem',marginBottom:'14px',lineHeight:1.5}}>Staff will be notified it was a false alarm. Only cancel if you are completely safe.</p>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
+                <button onClick={() => setShowCancel(false)}
+                  style={{background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:'12px',padding:'12px',color:'rgba(255,255,255,0.5)',fontSize:'0.85rem',fontWeight:600,cursor:'pointer'}}>
+                  ← Keep Alert
+                </button>
+                <button onClick={onCancel}
+                  style={{background:'rgba(239,68,68,0.15)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:'12px',padding:'12px',color:'#fca5a5',fontSize:'0.85rem',fontWeight:700,cursor:'pointer'}}>
+                  ✓ Cancel SOS
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );
 }
 
 /* ─── Responded ──────────────────────────────────────────────────────────── */
-function DoneScreen({ room, floor, response, incStatus, dmToken, dmLeft, dmInterval, dmMissed, onPing, onChangeResponse }) {
+function DoneScreen({ room, floor, evacMsg, response, incStatus, dmToken, dmLeft, dmInterval, dmMissed, onPing, onChangeResponse }) {
   const safe = response === 'safe';
   return (
     <div className="min-h-dvh flex flex-col" style={{background:'#0d0d0d',padding:'0 20px 48px'}}>
@@ -568,6 +653,17 @@ function DoneScreen({ room, floor, response, incStatus, dmToken, dmLeft, dmInter
             </div>
           )}
         </div>
+
+        {/* Evacuation route — always show during active emergency */}
+        {evacMsg && (
+          <div className="anim-slide-up" style={{animationDelay:'0.05s',background:'rgba(245,158,11,0.08)',border:'1px solid rgba(245,158,11,0.2)',borderRadius:'16px',padding:'16px',display:'flex',gap:'12px',alignItems:'flex-start'}}>
+            <span style={{fontSize:'1.5rem',flexShrink:0}}>🚪</span>
+            <div>
+              <p style={{fontSize:'0.68rem',fontWeight:600,color:'rgba(245,158,11,0.7)',textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:'4px'}}>Evacuation Route</p>
+              <p style={{fontSize:'0.88rem',color:'rgba(251,191,36,0.85)',lineHeight:1.5}}>{evacMsg}</p>
+            </div>
+          </div>
+        )}
 
         {/* Change status */}
         <div className="anim-slide-up" style={{animationDelay:'0.08s'}}>

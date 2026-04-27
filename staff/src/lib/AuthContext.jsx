@@ -5,16 +5,18 @@ import { api } from './api.js';
 const AuthCtx = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user,    setUser]    = useState(null);  // firebase user
-  const [profile, setProfile] = useState(null);  // backend profile
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState('');
+  const [user,      setUser]      = useState(null);  // firebase user
+  const [profile,   setProfile]   = useState(null);  // backend profile
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState('');
+  const [noProfile, setNoProfile] = useState(false); // firebase ok but no backend profile
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
       if (!fbUser) {
         setUser(null);
         setProfile(null);
+        setNoProfile(false);
         setLoading(false);
         return;
       }
@@ -22,8 +24,11 @@ export function AuthProvider({ children }) {
       try {
         const p = await api.get('/api/staff/profile');
         setProfile(p);
-      } catch {
+        setNoProfile(false);
+      } catch (err) {
         setProfile(null);
+        // 403 = authenticated with Firebase but no backend profile linked yet
+        setNoProfile(true);
       }
       setLoading(false);
     });
@@ -47,17 +52,21 @@ export function AuthProvider({ children }) {
     await signOut(auth);
     setUser(null);
     setProfile(null);
+    setNoProfile(false);
   }, []);
 
   const refreshProfile = useCallback(async () => {
     try {
       const p = await api.get('/api/staff/profile');
       setProfile(p);
-    } catch { /* ignore */ }
+      setNoProfile(false);
+    } catch {
+      setNoProfile(true);
+    }
   }, []);
 
   return (
-    <AuthCtx.Provider value={{ user, profile, loading, error, login, logout, refreshProfile }}>
+    <AuthCtx.Provider value={{ user, profile, loading, error, noProfile, login, logout, refreshProfile }}>
       {children}
     </AuthCtx.Provider>
   );

@@ -15,6 +15,25 @@ const guestRateLimit = rateLimit({
   message: { error: "Too many requests" },
 });
 
+// ── Exit routes (public — for guest display) ──────────────────────────────
+const ExitRoute = require("../../hotel/model/exitRoute.model");
+
+/** GET /api/guests/exit-routes?hotel_id=&floor= — fetch exit routes for guest */
+router.get(
+  "/exit-routes",
+  guestRateLimit,
+  asyncHandler(async (req, res) => {
+    const { hotel_id, floor } = req.query;
+    if (!hotel_id || !floor) return res.status(400).json({ error: "hotel_id and floor required" });
+    const routes = await ExitRoute.find({
+      hotel_id,
+      floor: parseInt(floor),
+      is_active: true,
+    }).lean();
+    res.json(routes);
+  })
+);
+
 // ── Guest location (public — no auth) ────────────────────────────────────────
 
 /** POST /api/guests/locations  — check in a guest */

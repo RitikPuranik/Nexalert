@@ -73,6 +73,35 @@ async function handleGuestSOS(hotelId, { room, floor, type = "sos", language = "
     runTriagePipeline(incident._id).catch(console.error);
   }
 
+  // Create an immediate GuestNotification so staff can see the SOS guest in the WarRoom
+  // before triage completes (triage may upsert over this record later)
+  await GuestNotification.findOneAndUpdate(
+    { incident_id: incident._id, room: String(room) },
+    {
+      incident_id:       incident._id,
+      hotel_id:          hotelId,
+      guest_location_id: guestDoc._id,
+      room:              String(room),
+      floor:             parseInt(floor),
+      language:          "en",
+      alert_text:        "🆘 Guest initiated SOS",
+      evacuation_instruction: exitInstruction || "Please follow emergency staff instructions.",
+      channel:           "in_app",
+      delivery_status:   "delivered",
+      guest_response:    "no_response",
+    },
+    { upsert: true, new: true }
+  );
+
+  // Notify staff in real-time so the WarRoom refreshes immediately
+  emitCrisisEvent(hotelId, "incident:updated", {
+    incident_id: incident._id,
+    action: "guest_sos",
+    room: String(room),
+    floor: parseInt(floor),
+    source: "guest_sos",
+  });
+
   // Auto-create deadman session for this SOS guest
   const dm = await DeadmanSession.create({
     incident_id:       incident._id,

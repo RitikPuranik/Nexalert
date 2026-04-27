@@ -111,6 +111,7 @@ export default function Dashboard() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-white capitalize">{inc.type.replace(/_/g,' ')}</span>
                     {inc.is_cascade && <span className="text-[9px] font-bold text-red-400 bg-red-500/10 px-1 rounded">⚡CASCADE</span>}
+                    {inc.source === 'guest_sos' && <span className="text-[9px] font-bold text-red-400 bg-red-500/10 px-1 rounded border border-red-500/20">🆘 GUEST SOS</span>}
                   </div>
                   <p className="text-xs text-slate-600 mt-0.5">Floor {inc.floor}{inc.zone?` · ${inc.zone}`:''} · {inc.source} · {timeAgo(inc.createdAt)}</p>
                 </div>

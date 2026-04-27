@@ -113,7 +113,11 @@ export default function Incidents() {
                     ? <span className={`text-[9px] font-bold border px-1.5 py-0.5 rounded ${SEV_STYLE[inc.severity]}`}>{SEVERITY_LABELS[inc.severity]}</span>
                     : <span className="text-slate-700">—</span>}
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-600">{inc.source}</td>
+                  <td className="px-4 py-3 text-xs text-slate-600">
+                    {inc.source === 'guest_sos'
+                      ? <span className="text-[9px] font-bold text-red-400 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded">🆘 guest_sos</span>
+                      : inc.source}
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`text-[9px] font-semibold border px-1.5 py-0.5 rounded capitalize ${STA_STYLE[inc.status]||'bg-slate-500/10 text-slate-400 border-slate-500/15'}`}>
                       {STATUS_LABELS[inc.status]||inc.status}

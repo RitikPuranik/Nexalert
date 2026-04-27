@@ -57,12 +57,16 @@ export default function WarRoom() {
       });
       s.on('warroom:chat', msg => setMessages(p => [...p, msg]));
       s.on('incident:updated', () => loadWarRoom());
+      s.on('guest:response', () => loadWarRoom());   // refresh instantly on guest SOS response
+      s.on('triage:complete', () => loadWarRoom());  // refresh when AI triage finishes
     });
     const poll = setInterval(() => loadWarRoom(), 20000);
     return () => {
       clearInterval(poll);
       sock?.off('warroom:chat');
       sock?.off('incident:updated');
+      sock?.off('guest:response');
+      sock?.off('triage:complete');
       sock?.emit('leave:incident', id);
     };
   }, [id, profile?.hotel_id]);
@@ -155,6 +159,20 @@ export default function WarRoom() {
         }`}>{STATUS_LABELS[inc?.status]||inc?.status}</span>
       </div>
 
+      {/* Guest SOS Banner — highlight when triggered by a guest */}
+      {inc?.source === 'guest_sos' && (
+        <div className="bg-red-500/8 border border-red-500/20 rounded-2xl px-5 py-3 flex items-center gap-3 animate-pulse">
+          <span className="text-xl shrink-0">🆘</span>
+          <div>
+            <p className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Guest-Initiated SOS</p>
+            <p className="text-sm text-red-300/80">
+              Room {inc?.room} on Floor {inc?.floor} triggered an emergency alert.
+              {' '}Guest response tracking is active below.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* AI Summary */}
       {inc?.ai_summary && (
         <div className="bg-indigo-500/5 border border-indigo-500/15 rounded-2xl px-5 py-4">
@@ -225,29 +243,49 @@ export default function WarRoom() {
           </div>
 
           {/* Guest Responses */}
-          {guests.length>0 && (
-            <div className="glass rounded-2xl">
-              <div className="px-5 py-4 border-b border-white/5">
-                <span className="font-semibold text-white text-sm">Guest Responses ({guests.length})</span>
-              </div>
-              <div className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {guests.map(g => (
-                  <div key={g._id} className={`p-3 rounded-xl border text-xs ${
-                    g.response==='safe'?'bg-emerald-500/8 border-emerald-500/15'
-                    :g.response==='needs_help'?'bg-red-500/8 border-red-500/15'
-                    :'bg-white/3 border-white/8'
-                  }`}>
-                    <p className="font-semibold text-white">Room {g.room}</p>
-                    <p className="text-slate-500">Floor {g.floor}</p>
-                    <p className={`mt-1 font-bold text-[10px] uppercase ${g.response==='safe'?'text-emerald-400':g.response==='needs_help'?'text-red-400':'text-slate-600'}`}>
-                      {g.response==='safe'?'✅ Safe':g.response==='needs_help'?'🆘 Help':'No Response'}
-                    </p>
-                    {g.name && <p className="text-[10px] text-slate-600 mt-0.5">{g.name}</p>}
+          {(() => {
+            const guestList = warroom?.guests || [];
+            return guestList.length > 0 && (
+              <div className="glass rounded-2xl">
+                <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
+                  <span className="font-semibold text-white text-sm">Guest Status ({guestList.length})</span>
+                  <div className="flex gap-3 text-xs text-slate-600">
+                    <span className="text-emerald-400">{guestList.filter(g=>g.response==='safe').length} safe</span>
+                    <span className="text-red-400">{guestList.filter(g=>g.response==='needs_help').length} need help</span>
+                    <span className="text-slate-500">{guestList.filter(g=>g.response==='no_response').length} no response</span>
                   </div>
-                ))}
+                </div>
+                <div className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {guestList.map(g => (
+                    <div key={g._id} className={`p-3 rounded-xl border text-xs ${
+                      g.response==='safe'?'bg-emerald-500/8 border-emerald-500/15'
+                      :g.response==='needs_help'?'bg-red-500/8 border-red-500/15 animate-pulse'
+                      :'bg-white/3 border-white/8'
+                    }`}>
+                      <p className="font-semibold text-white">Room {g.room}</p>
+                      <p className="text-slate-500">Floor {g.floor}</p>
+                      <p className={`mt-1 font-bold text-[10px] uppercase ${
+                        g.response==='safe'?'text-emerald-400'
+                        :g.response==='needs_help'?'text-red-400'
+                        :'text-slate-600'
+                      }`}>
+                        {g.response==='safe'?'✅ Safe'
+                         :g.response==='needs_help'?'🆘 Needs Help'
+                         :'⏳ No Response'}
+                      </p>
+                      {g.name && <p className="text-[10px] text-slate-600 mt-0.5">{g.name}</p>}
+                      {g.needs_accessibility && <p className="text-[10px] text-amber-400 mt-0.5">♿ Accessibility</p>}
+                      {g.delivery_status && g.delivery_status!=='not_notified' && (
+                        <p className={`text-[9px] mt-1 ${g.delivery_status==='delivered'||g.delivery_status==='sent'?'text-slate-600':'text-red-500'}`}>
+                          {g.delivery_status}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Staff Presence */}
           {presence.length>0 && (
