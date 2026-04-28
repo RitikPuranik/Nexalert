@@ -53,8 +53,12 @@ export default function Dashboard() {
   }
 
   useEffect(() => { if (profile) load(); }, [profile]);
+  // Reload incident list whenever any meaningful SSE event arrives
   useEffect(() => {
-    if (events.length && events[0]?.type?.startsWith('incident')) load();
+    if (!events.length) return;
+    const evt = events[0];
+    const RELOAD_ON = ['incident:created','incident:updated','incident:resolved','triage:complete','guest:response'];
+    if (RELOAD_ON.includes(evt?.type)) load();
   }, [events]);
 
   const active   = incidents.filter(i => !['resolved','false_alarm'].includes(i.status));

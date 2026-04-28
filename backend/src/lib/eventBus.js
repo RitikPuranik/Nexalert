@@ -37,7 +37,10 @@ class EventBus {
 
     for (const entry of listeners) {
       try {
+        // Send as BOTH a named event (for addEventListener) AND as a generic
+        // "message" event (for onmessage). This ensures all client patterns work.
         entry.res.write(`event: ${eventType}\ndata: ${data}\n\n`);
+        entry.res.write(`data: ${data}\n\n`);
       } catch {
         dead.add(entry);
       }

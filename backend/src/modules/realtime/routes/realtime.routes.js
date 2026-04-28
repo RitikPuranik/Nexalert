@@ -19,14 +19,16 @@ const router = express.Router();
  * Responders pass role=responder for public read-only access.
  */
 router.get("/sse", async (req, res) => {
-  const { hotel_id, role } = req.query;
+  const { hotel_id, role, token: queryToken } = req.query;
   if (!hotel_id) return res.status(400).json({ error: "hotel_id required" });
 
   let userId = "anonymous";
 
   if (role !== "responder") {
+    // Accept token from Authorization header OR from ?token= query param
+    // (EventSource API cannot send custom headers, so query param is the workaround)
     const header = req.headers.authorization || "";
-    const token  = header.startsWith("Bearer ") ? header.slice(7) : null;
+    const token  = (header.startsWith("Bearer ") ? header.slice(7) : null) || queryToken;
     if (!token) return res.status(401).json({ error: "Missing auth token" });
 
     try {

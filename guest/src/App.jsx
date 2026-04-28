@@ -524,7 +524,125 @@ function HoldScreen({ loading, error, onConfirm, onCancel }) {
 }
 
 /* ─── Active SOS ─────────────────────────────────────────────────────────── */
-function ActiveScreen({ room, floor, evacMsg, guestAlert, incStatus, dmToken, dmLeft, dmInterval, dmMissed, onSafe, onHelp, onPing, onCancel }) {
+/* ═══════════════════════════════════════════════════════════════
+   FLOOR MAP — real-time 2D mini-map for guests showing exits
+═══════════════════════════════════════════════════════════════ */
+const CELL_PX = 22; // smaller cells for mobile
+const GRID_W  = 20;
+const GRID_H  = 14;
+const TYPE_STYLE = {
+  room:     { icon: '🛏', color: '#3b82f6', bg: 'rgba(59,130,246,0.12)' },
+  stairs:   { icon: '🪜', color: '#f59e0b', bg: 'rgba(245,158,11,0.25)', pulse: true },
+  lift:     { icon: '🛗', color: '#a78bfa', bg: 'rgba(167,139,250,0.20)' },
+  exit:     { icon: '🚪', color: '#22c55e', bg: 'rgba(34,197,94,0.30)',  pulse: true },
+  hazard:   { icon: '⚠️', color: '#ef4444', bg: 'rgba(239,68,68,0.20)' },
+  assembly: { icon: '⛺', color: '#06b6d4', bg: 'rgba(6,182,212,0.20)' },
+  wall:     { icon: '',   color: '#475569', bg: 'rgba(71,85,105,0.35)'  },
+};
+
+function GuestFloorMap({ hotel_id, floor }) {
+  const [cells, setCells]   = useState({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!hotel_id || !floor) return;
+    fetch(`/api/guests/floor-plan?hotel_id=${hotel_id}&floor=${floor}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(fp => {
+        if (fp?.grid_cells) {
+          // grid_cells from MongoDB Map comes as plain object
+          setCells(typeof fp.grid_cells === 'object' ? fp.grid_cells : {});
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [hotel_id, floor]);
+
+  const hasCells = Object.keys(cells).length > 0;
+
+  if (loading) return (
+    <div style={{textAlign:'center',padding:'20px',color:'rgba(255,255,255,0.2)',fontSize:'0.75rem'}}>
+      Loading floor map…
+    </div>
+  );
+
+  if (!hasCells) return null; // Don't show if no floor plan configured
+
+  const exits  = Object.entries(cells).filter(([,v]) => v.type === 'exit' || v.type === 'stairs');
+  const myCell = Object.entries(cells).find(([,v]) => v.label && v.label.replace(/\D/g,'') === String(floor).padStart ? null : v);
+
+  return (
+    <div style={{background:'rgba(0,0,0,0.4)',border:'1px solid rgba(34,197,94,0.2)',borderRadius:'16px',padding:'14px',overflow:'hidden'}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'10px'}}>
+        <p style={{fontSize:'0.65rem',fontWeight:700,color:'rgba(34,197,94,0.7)',textTransform:'uppercase',letterSpacing:'0.12em'}}>
+          🗺 Floor {floor} — Exit Map
+        </p>
+        <div style={{display:'flex',gap:'8px'}}>
+          {exits.length > 0 && <span style={{fontSize:'0.6rem',color:'rgba(34,197,94,0.5)'}}>🟢 {exits.length} exits found</span>}
+        </div>
+      </div>
+
+      {/* Mini grid */}
+      <div style={{
+        display:'grid',
+        gridTemplateColumns:`repeat(${GRID_W}, ${CELL_PX}px)`,
+        gridTemplateRows:`repeat(${GRID_H}, ${CELL_PX}px)`,
+        gap:0,
+        border:'1px solid rgba(255,255,255,0.04)',
+        borderRadius:8,
+        overflow:'hidden',
+        background:'#070710',
+        maxWidth:'100%',
+        overflowX:'auto',
+      }}>
+        {Array.from({ length: GRID_H }, (_, row) =>
+          Array.from({ length: GRID_W }, (_, col) => {
+            const key = `${col}_${row}`;
+            const cell = cells[key];
+            const meta = cell ? TYPE_STYLE[cell.type] : null;
+            const isExit = cell && (cell.type === 'exit' || cell.type === 'stairs');
+            return (
+              <div key={key} style={{
+                width: CELL_PX, height: CELL_PX,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.65rem',
+                background: cell ? meta?.bg : 'transparent',
+                border: isExit ? `1px solid ${meta?.color}60` : '1px solid rgba(255,255,255,0.02)',
+                position: 'relative',
+                animation: isExit ? 'exitPulse 1.5s ease-in-out infinite' : 'none',
+              }}>
+                {cell && meta?.icon && <span style={{fontSize:'0.6rem',lineHeight:1}}>{meta.icon}</span>}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Legend */}
+      <div style={{display:'flex',gap:'12px',marginTop:'10px',flexWrap:'wrap'}}>
+        {[
+          { icon:'🚪', label:'Exit', color:'#22c55e' },
+          { icon:'🪜', label:'Stairs', color:'#f59e0b' },
+          { icon:'🛗', label:'Lift', color:'#a78bfa' },
+        ].map(({ icon, label, color }) => (
+          <div key={label} style={{display:'flex',alignItems:'center',gap:'4px'}}>
+            <span style={{fontSize:'0.7rem'}}>{icon}</span>
+            <span style={{fontSize:'0.6rem',color:'rgba(255,255,255,0.3)'}}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {exits.length > 0 && (
+        <p style={{fontSize:'0.7rem',color:'rgba(34,197,94,0.6)',marginTop:'8px',lineHeight:1.4}}>
+          ↑ Highlighted cells show nearest exits and stairwells on your floor.
+          Do <strong style={{color:'rgba(239,68,68,0.7)'}}>NOT</strong> use lifts during emergencies.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ActiveScreen({ room, floor, hotel_id, evacMsg, guestAlert, incStatus, dmToken, dmLeft, dmInterval, dmMissed, onSafe, onHelp, onPing, onCancel }) {
   const [showCancel, setShowCancel] = useState(false);
   return (
     <div className="min-h-dvh flex flex-col" style={{background:'#0d0d0d',padding:'0 20px 48px'}}>
@@ -555,6 +673,11 @@ function ActiveScreen({ room, floor, evacMsg, guestAlert, incStatus, dmToken, dm
             </div>
           </div>
         )}
+
+        {/* Interactive floor map */}
+        <div className="anim-slide-up" style={{animationDelay:'0.1s'}}>
+          <GuestFloorMap hotel_id={hotel_id} floor={floor}/>
+        </div>
 
         {/* Hotel alert */}
         {guestAlert && (

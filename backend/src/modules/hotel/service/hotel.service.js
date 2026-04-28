@@ -56,11 +56,21 @@ async function getFloorPlan(hotelId, floor) {
 }
 
 async function upsertFloorPlan(hotelId, floor, data) {
-  return FloorPlan.findOneAndUpdate(
+  const { grid_cells, ...rest } = data;
+  const setFields = { hotel_id: hotelId, floor: Number(floor), ...rest };
+  if (grid_cells !== undefined) setFields.grid_cells = grid_cells;
+
+  // Use findOneAndUpdate with $set so Mongoose detects changes on Mixed fields
+  const doc = await FloorPlan.findOneAndUpdate(
     { hotel_id: hotelId, floor: Number(floor) },
-    { hotel_id: hotelId, floor: Number(floor), ...data },
+    { $set: setFields },
     { upsert: true, new: true }
-  ).lean();
+  );
+  if (grid_cells !== undefined) {
+    doc.markModified('grid_cells');
+    await doc.save();
+  }
+  return doc.toObject();
 }
 
 // ── Geofences ─────────────────────────────────────────────────────────────────────

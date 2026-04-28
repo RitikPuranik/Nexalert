@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { api } from '../lib/api.js';
 import { getSocket } from '../lib/socket.js';
+import { useSSE } from '../lib/useSSE.js';
 import { INCIDENT_ICONS, SEVERITY_LABELS, STATUS_LABELS, timeAgo, formatTime, initials } from '../lib/utils.js';
 
 const SEV = {1:'bg-red-500/12 text-red-400 border-red-500/20',2:'bg-amber-500/12 text-amber-400 border-amber-500/20',3:'bg-blue-500/12 text-blue-400 border-blue-500/20'};
@@ -32,9 +33,20 @@ export default function WarRoom() {
   const [messages,setMessages]= useState([]);
   const [chat,    setChat]    = useState('');
   const [actLoading, setActLoading] = useState(null);
-  const chatRef = useRef(null);
+  const chatRef   = useRef(null);
   const socketRef = useRef(null);
 
+  // SSE backup — refresh WarRoom on any relevant event even if Socket.IO drops
+  const { events: sseEvents } = useSSE(profile?.hotel_id);
+  const lastSseId = useRef(null);
+  useEffect(() => {
+    if (!sseEvents.length) return;
+    const evt = sseEvents[0];
+    if (evt._id === lastSseId.current) return;
+    lastSseId.current = evt._id;
+    const RELOAD_ON = ['incident:updated','incident:created','triage:complete','guest:response','task:updated'];
+    if (RELOAD_ON.includes(evt?.type)) loadWarRoom();
+  }, [sseEvents]);
   async function loadWarRoom() {
     try {
       const data = await api.get(`/api/realtime/warroom?incident_id=${id}`);

@@ -16,7 +16,8 @@ const guestRateLimit = rateLimit({
 });
 
 // ── Exit routes (public — for guest display) ──────────────────────────────
-const ExitRoute = require("../../hotel/model/exitRoute.model");
+const ExitRoute  = require("../../hotel/model/exitRoute.model");
+const FloorPlan  = require("../../hotel/model/floorPlan.model");
 
 /** GET /api/guests/exit-routes?hotel_id=&floor= — fetch exit routes for guest */
 router.get(
@@ -31,6 +32,19 @@ router.get(
       is_active: true,
     }).lean();
     res.json(routes);
+  })
+);
+
+/** GET /api/guests/floor-plan?hotel_id=&floor= — fetch 2D grid for guest map */
+router.get(
+  "/floor-plan",
+  guestRateLimit,
+  asyncHandler(async (req, res) => {
+    const { hotel_id, floor } = req.query;
+    if (!hotel_id || !floor) return res.status(400).json({ error: "hotel_id and floor required" });
+    const plan = await FloorPlan.findOne({ hotel_id, floor: parseInt(floor) }).lean();
+    if (!plan) return res.json({});
+    res.json({ floor: plan.floor, grid_cells: plan.grid_cells || {} });
   })
 );
 

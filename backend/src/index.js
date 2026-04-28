@@ -8,6 +8,7 @@ const { connectDB } = require("./config/db");
 
 // ── Route modules ────────────────────────────────────────────────────────────
 const hotelRoutes    = require("./modules/hotel/routes/hotel.routes");
+const roomRoutes     = require("./modules/hotel/routes/room.routes");
 const sensorRoutes   = require("./modules/sensor/routes/sensor.routes");
 const staffRoutes    = require("./modules/staff/routes/staff.routes");
 const guestRoutes    = require("./modules/guest/routes/guest.routes");
@@ -50,6 +51,7 @@ app.get("/api/health", (_req, res) => {
 
 // ── Module routes ─────────────────────────────────────────────────────────────
 app.use("/api/hotels",    hotelRoutes);
+app.use("/api/rooms",     roomRoutes);
 app.use("/api/sensors",   sensorRoutes);
 app.use("/api/staff",     staffRoutes);
 app.use("/api/guests",    guestRoutes);

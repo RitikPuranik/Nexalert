@@ -111,7 +111,20 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const plan = await svc.getFloorPlan(req.user.profile.hotel_id, req.params.floor);
-    if (!plan) return res.status(404).json({ error: "Floor plan not found" });
+    // Return empty object (not 404) so frontend can detect "no plan yet"
+    if (!plan) return res.json({});
+    res.json({ ...plan, grid_cells: plan.grid_cells || {} });
+  })
+);
+
+/** PATCH /api/hotels/floor-plans/:floor  — save 2D grid (manager) */
+router.patch(
+  "/floor-plans/:floor",
+  requireAuth,
+  requireRole("manager"),
+  asyncHandler(async (req, res) => {
+    const { floor } = req.params;
+    const plan = await svc.upsertFloorPlan(req.user.profile.hotel_id, floor, req.body);
     res.json(plan);
   })
 );
@@ -126,6 +139,17 @@ router.post(
     if (!floor) return res.status(400).json({ error: "floor required" });
     const plan = await svc.upsertFloorPlan(req.user.profile.hotel_id, floor, data);
     res.status(201).json(plan);
+  })
+);
+
+/** POST /api/hotels/generate-qr  — generate QR token alias (manager) */
+router.post(
+  "/generate-qr",
+  requireAuth,
+  requireRole("manager"),
+  asyncHandler(async (req, res) => {
+    const result = await svc.generateQrToken(req.user.profile.hotel_id);
+    res.json(result);
   })
 );
 

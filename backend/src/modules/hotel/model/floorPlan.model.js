@@ -11,6 +11,13 @@ const FloorPlanSchema = new Schema(
     hazard_zones: [{ label: String, type: String, coordinates: { lat: Number, lng: Number } }],
     /** Room label → coordinates mapping for the live map */
     rooms: [{ room: String, coordinates: { lat: Number, lng: Number } }],
+    /**
+     * 2D grid cells for the visual floor plan editor.
+     * Key format: "col_row" → { type, label }
+     * e.g. { "3_2": { type: "room", label: "301" }, "4_2": { type: "stairs", label: "STAIR" } }
+     * Using Mixed so plain JS objects round-trip cleanly without Map wrapper.
+     */
+    grid_cells: { type: Object, default: {} },
   },
   { timestamps: true }
 );
