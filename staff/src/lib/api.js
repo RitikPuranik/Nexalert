@@ -1,5 +1,10 @@
 import { auth } from './firebase.js';
 
+// Base URL for all API calls.
+// In production set VITE_BACKEND_URL=https://your-backend.com in your .env
+// In development leave it empty — Vite proxy handles /api → localhost:3001
+const BASE = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '');
+
 async function getToken() {
   const user = auth.currentUser;
   if (!user) throw new Error('Not authenticated');
@@ -16,7 +21,7 @@ async function request(method, url, body) {
     },
   };
   if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(url, opts);
+  const res = await fetch(BASE + url, opts);
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
@@ -31,14 +36,14 @@ export const api = {
 
 // Public (no auth) fetch
 export async function publicGet(url) {
-  const res = await fetch(url);
+  const res = await fetch(BASE + url);
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
 
 export async function publicPost(url, body) {
-  const res = await fetch(url, {
+  const res = await fetch(BASE + url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

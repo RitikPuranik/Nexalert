@@ -11,9 +11,14 @@ function getParams() {
   };
 }
 
+/* ─── Backend base URL ────────────────────────────────────────────────────── */
+// In production set VITE_BACKEND_URL=https://your-backend.com in .env
+// In development leave empty — Vite proxy handles /api → localhost:3001
+const BASE = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '');
+
 /* ─── API (all public endpoints) ─────────────────────────────────────────── */
 async function post(url, body) {
-  const r = await fetch(url, {
+  const r = await fetch(BASE + url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -23,7 +28,7 @@ async function post(url, body) {
   return d;
 }
 async function patch(url, body) {
-  const r = await fetch(url, {
+  const r = await fetch(BASE + url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -33,7 +38,7 @@ async function patch(url, body) {
   return d;
 }
 async function get(url) {
-  const r = await fetch(url);
+  const r = await fetch(BASE + url);
   const d = await r.json();
   if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
   return d;
@@ -546,7 +551,7 @@ function GuestFloorMap({ hotel_id, floor }) {
 
   useEffect(() => {
     if (!hotel_id || !floor) return;
-    fetch(`/api/guests/floor-plan?hotel_id=${hotel_id}&floor=${floor}`)
+    fetch(`${BASE}/api/guests/floor-plan?hotel_id=${hotel_id}&floor=${floor}`)
       .then(r => r.ok ? r.json() : null)
       .then(fp => {
         if (fp?.grid_cells) {

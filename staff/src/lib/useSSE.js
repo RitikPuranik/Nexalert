@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { auth } from './firebase.js';
 
+// In production set VITE_BACKEND_URL=https://your-backend.com
+const BASE = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '');
+
 // All named event types the backend can emit
 const SSE_EVENT_TYPES = [
   'incident:created',
@@ -54,7 +57,7 @@ export function useSSE(hotelId) {
 
         esRef.current?.close();
 
-        const url = `/api/realtime/sse?hotel_id=${hotelId}&token=${encodeURIComponent(token)}`;
+        const url = `${BASE}/api/realtime/sse?hotel_id=${hotelId}&token=${encodeURIComponent(token)}`;
         const es  = new EventSource(url);
         esRef.current = es;
 
