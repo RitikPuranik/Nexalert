@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "default": "nexalert-18c72"
+  },
+  "targets": {
+    "nexalert-18c72": {
+      "hosting": {
+        "staff": [
+          "nexalert-staff"
+        ],
+        "guest": [
+          "nexalert-guest"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
